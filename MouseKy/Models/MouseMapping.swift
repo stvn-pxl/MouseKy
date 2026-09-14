@@ -100,9 +100,20 @@ enum KeyName {
 }
 
 struct MouseMapping: Codable, Identifiable, Equatable {
-    var id: Int { buttonNumber }
-    let buttonNumber: Int
-    var shortcut: KeyboardShortcut?
+    var id: String { controlID.id }
+    let controlID: MouseControlID
+    var action: MouseButtonAction
+
+    var buttonNumber: Int { controlID.legacyButtonNumber ?? -1 }
+    var shortcut: KeyboardShortcut? {
+        get {
+            guard case let .shortcut(shortcut) = action else { return nil }
+            return shortcut
+        }
+        set {
+            action = newValue.map(MouseButtonAction.shortcut) ?? .passthrough
+        }
+    }
 
     var isPrimaryButton: Bool { buttonNumber == 0 || buttonNumber == 1 }
     var displayName: String {
@@ -112,5 +123,39 @@ struct MouseMapping: Codable, Identifiable, Equatable {
         case 2: return "Middle Click"
         default: return "Button \(buttonNumber)"
         }
+    }
+
+    init(controlID: MouseControlID, action: MouseButtonAction = .passthrough) {
+        self.controlID = controlID
+        self.action = action
+    }
+
+    init(buttonNumber: Int, shortcut: KeyboardShortcut?) {
+        controlID = .logitechButton(buttonNumber)
+        action = shortcut.map(MouseButtonAction.shortcut) ?? .passthrough
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case controlID, action, buttonNumber, shortcut
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let controlID = try container.decodeIfPresent(MouseControlID.self, forKey: .controlID) {
+            self.controlID = controlID
+            action = try container.decodeIfPresent(MouseButtonAction.self, forKey: .action) ??
+                .passthrough
+        } else {
+            let buttonNumber = try container.decode(Int.self, forKey: .buttonNumber)
+            controlID = .logitechButton(buttonNumber)
+            let shortcut = try container.decodeIfPresent(KeyboardShortcut.self, forKey: .shortcut)
+            action = shortcut.map(MouseButtonAction.shortcut) ?? .passthrough
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(controlID, forKey: .controlID)
+        try container.encode(action, forKey: .action)
     }
 }

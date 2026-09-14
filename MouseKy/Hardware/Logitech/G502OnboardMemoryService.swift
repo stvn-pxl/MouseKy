@@ -36,6 +36,22 @@ struct G502OnboardProfileSnapshot: Codable, Equatable {
 /// The write path has no default schema: an unknown firmware/profile layout cannot
 /// be reset merely because it shares the C08D USB product identifier.
 final class G502OnboardMemoryService {
+    private let backupDirectory: URL?
+
+    init(backupDirectory: URL? = nil) {
+        self.backupDirectory = backupDirectory
+    }
+
+    struct ImportedBinding: Equatable {
+        enum Kind: Equatable {
+            case keyboard(KeyboardShortcut)
+            case consumer
+        }
+
+        let controlID: MouseControlID
+        let kind: Kind
+    }
+
     enum Status: Equatable {
         case notLogitech
         case unsupportedDevice
@@ -53,6 +69,10 @@ final class G502OnboardMemoryService {
     private(set) var latestBackupURL: URL?
     var canResetLatestSnapshot: Bool {
         guard let snapshot = latestSnapshot else { return false }
+        return isWritable(snapshot)
+    }
+
+    func isWritable(_ snapshot: G502OnboardProfileSnapshot) -> Bool {
         return snapshot.descriptor.isVerifiedC08DLayout &&
             Self.isVerifiedFirmware(snapshot.firmware) &&
             snapshot.onboardFeatureVersion == 0 &&
@@ -87,23 +107,31 @@ final class G502OnboardMemoryService {
     }
 
     func probeAndBackup(mouse: ConnectedMouse) async throws -> G502OnboardProfileSnapshot {
+        let session = try await HIDPPDeviceSession.connect(mouse: mouse)
+        return try await probeAndBackup(mouse: mouse, session: session)
+    }
+
+    func probeAndBackup(
+        mouse: ConnectedMouse,
+        session: HIDPPDeviceSessionProtocol
+    ) async throws -> G502OnboardProfileSnapshot {
         guard mouse.identifier.vendorID == Self.logitechVendorID,
-              mouse.identifier.productID == Self.g502C08DProductID,
-              let interface = HIDPP42Transport.discoverInterface(
-                vendorID: mouse.identifier.vendorID, productID: mouse.identifier.productID
-              )
+              mouse.identifier.productID == Self.g502C08DProductID
         else { throw OnboardMemoryError.interfaceNotFound }
 
-        let transport = try await HIDPP42Transport.connect(interface: interface)
-        let firmware = try await transport.firmwareInformation()
+        let firmware = try await session.firmwareInformation()
         guard !firmware.isEmpty else { throw OnboardMemoryError.firmwareUnavailable }
-        guard let feature = try await transport.lookupFeature(G502C08DOnboardProfileSnapshotDecoder.onboardProfilesFeatureID) else {
+        guard let feature = try await session.feature(G502C08DOnboardProfileSnapshotDecoder.onboardProfilesFeatureID) else {
             throw OnboardMemoryError.onboardProfilesUnavailable
         }
-        let resetFeatureAvailable = try await transport.lookupFeature(0x1802) != nil
+        let resetFeatureAvailable = try await session.feature(0x1802) != nil
         var decoder = G502C08DOnboardProfileSnapshotDecoder(featureIndex: feature.index)
         for request in decoder.readOnlyRequests() {
-            try decoder.consume(try await transport.readOnboardProfile(request, onboardFeatureIndex: feature.index))
+            try decoder.consume(try await session.call(
+                feature: feature,
+                function: request.functionID,
+                parameters: request.parameters
+            ))
         }
         guard let basicSnapshot = decoder.snapshot() else { throw OnboardMemoryError.incompleteSnapshot }
         guard basicSnapshot.descriptor.profileCount <= 8,
@@ -112,7 +140,8 @@ final class G502OnboardMemoryService {
         else { throw OnboardMemoryError.invalidProfileFormat }
 
         let directory = try await readSector(
-            0, decoder: decoder, transport: transport, size: basicSnapshot.descriptor.readSize
+            0, decoder: decoder, feature: feature, session: session,
+            size: basicSnapshot.descriptor.readSize
         )
         let directoryIsValid = Self.sectorHasValidCRC(directory)
         guard let reportedActiveSector = basicSnapshot.currentProfileSector,
@@ -136,7 +165,7 @@ final class G502OnboardMemoryService {
             throw OnboardMemoryError.invalidDirectory
         }
         let profile = try await readSector(
-            activeSector, decoder: decoder, transport: transport,
+            activeSector, decoder: decoder, feature: feature, session: session,
             size: basicSnapshot.descriptor.readSize
         )
         guard Self.sectorHasValidCRC(profile) else { throw OnboardMemoryError.invalidSectorCRC }
@@ -161,7 +190,7 @@ final class G502OnboardMemoryService {
         }
         if resetFeatureAvailable { warnings.append("Device Reset feature 0x1802 is present but is never used.") }
         let snapshot = G502OnboardProfileSnapshot(
-            deviceFingerprint: fingerprint(for: mouse, interfaceName: interface.productName),
+            deviceFingerprint: fingerprint(for: mouse, interfaceName: mouse.name),
             capturedAt: Date(),
             firmware: firmware,
             onboardFeatureVersion: feature.version,
@@ -188,7 +217,11 @@ final class G502OnboardMemoryService {
         mouseButton: Int?
     ) async throws -> G502OnboardProfileSnapshot {
         guard canResetLatestSnapshot else { throw OnboardMemoryError.protocolNotVerified }
-        let updated = try await updating(mouse: mouse) { sector, count in
+        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.backupRequired }
+        let session = try await HIDPPDeviceSession.connect(mouse: mouse)
+        let updated = try await updating(
+            mouse: mouse, session: session, snapshot: snapshot
+        ) { sector, count in
             guard (0 ..< count).contains(index) else { throw OnboardMemoryError.invalidButton }
             if let mouseButton {
                 Self.setGenericMouseBinding(in: &sector, index: index, bank: bank, mouseButton: mouseButton)
@@ -207,7 +240,11 @@ final class G502OnboardMemoryService {
         shortcut: KeyboardShortcut
     ) async throws -> G502OnboardProfileSnapshot {
         guard canResetLatestSnapshot else { throw OnboardMemoryError.protocolNotVerified }
-        let updated = try await updating(mouse: mouse) { sector, count in
+        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.backupRequired }
+        let session = try await HIDPPDeviceSession.connect(mouse: mouse)
+        let updated = try await updating(
+            mouse: mouse, session: session, snapshot: snapshot
+        ) { sector, count in
             guard (0 ..< count).contains(index) else { throw OnboardMemoryError.invalidButton }
             try Self.setKeyboardBinding(
                 in: &sector, index: index, bank: bank, shortcut: shortcut
@@ -217,12 +254,56 @@ final class G502OnboardMemoryService {
         return updated
     }
 
+    func importedBindings(
+        from snapshot: G502OnboardProfileSnapshot
+    ) -> [ImportedBinding] {
+        snapshot.buttonAssignments.compactMap { assignment in
+            guard assignment.bank == .primary, assignment.index > 1,
+                  assignment.rawValue.count == 4, assignment.rawValue[0] == 0x80
+            else { return nil }
+            switch assignment.rawValue[1] {
+            case 0x02:
+                guard let shortcut = Self.keyboardShortcut(from: assignment) else { return nil }
+                return ImportedBinding(
+                    controlID: .logitechButton(assignment.index),
+                    kind: .keyboard(shortcut)
+                )
+            case 0x03:
+                return ImportedBinding(
+                    controlID: .logitechButton(assignment.index),
+                    kind: .consumer
+                )
+            default:
+                return nil
+            }
+        }
+    }
+
+    func clearShortcutAssignments(
+        mouse: ConnectedMouse,
+        session: HIDPPDeviceSessionProtocol,
+        snapshot: G502OnboardProfileSnapshot
+    ) async throws -> G502OnboardProfileSnapshot {
+        guard snapshot.descriptor.isVerifiedC08DLayout,
+              Self.isVerifiedFirmware(snapshot.firmware),
+              snapshot.onboardFeatureVersion == 0
+        else { throw OnboardMemoryError.protocolNotVerified }
+        let updated = try await updating(
+            mouse: mouse, session: session, snapshot: snapshot
+        ) { sector, count in
+            Self.clearShortcutBindings(in: &sector, buttonCount: count)
+        }
+        latestSnapshot = updated
+        return updated
+    }
+
     private func updating(
         mouse: ConnectedMouse,
+        session: HIDPPDeviceSessionProtocol,
+        snapshot: G502OnboardProfileSnapshot,
         mutate: (inout Data, Int) throws -> Void
     ) async throws -> G502OnboardProfileSnapshot {
-        guard let snapshot = latestSnapshot, latestBackupURL != nil,
-              let activeSector = snapshot.activeProfileSector, snapshot.sectors.count >= 2
+        guard let activeSector = snapshot.activeProfileSector, snapshot.sectors.count >= 2
         else { throw OnboardMemoryError.backupRequired }
         guard snapshot.deviceFingerprint.hasPrefix("\(mouse.identifier.vendorID):\(mouse.identifier.productID):") else {
             throw OnboardMemoryError.snapshotBelongsToAnotherDevice
@@ -238,25 +319,56 @@ final class G502OnboardMemoryService {
         try mutate(&profile, min(Int(snapshot.descriptor.buttonCount), 16))
         Self.updateCRC(&profile)
 
-        guard let interface = HIDPP42Transport.discoverInterface(vendorID: mouse.identifier.vendorID, productID: mouse.identifier.productID) else {
-            throw OnboardMemoryError.interfaceNotFound
-        }
-        let transport = try await HIDPP42Transport.connect(interface: interface)
-        guard let feature = try await transport.lookupFeature(G502C08DOnboardProfileSnapshotDecoder.onboardProfilesFeatureID) else {
+        guard let feature = try await session.feature(G502C08DOnboardProfileSnapshotDecoder.onboardProfilesFeatureID) else {
             throw OnboardMemoryError.onboardProfilesUnavailable
         }
         guard feature.version == snapshot.onboardFeatureVersion else { throw OnboardMemoryError.protocolNotVerified }
         let decoder = G502C08DOnboardProfileSnapshotDecoder(featureIndex: feature.index)
         guard snapshot.directoryIsValid, activeSector < 0x0100 else { throw OnboardMemoryError.romProfileReadOnly }
         let targetSector = activeSector
-        try await writeSector(profile, sector: targetSector, decoder: decoder, transport: transport)
-        let readBack = try await readSector(targetSector, decoder: decoder, transport: transport, size: snapshot.descriptor.readSize)
-        guard readBack == profile, Self.sectorHasValidCRC(readBack) else { throw OnboardMemoryError.readBackFailed }
-
         let directory = snapshot.sectors[0]
-        try await writeSector(directory, sector: 0, decoder: decoder, transport: transport)
-        let directoryReadBack = try await readSector(0, decoder: decoder, transport: transport, size: snapshot.descriptor.readSize)
-        guard directoryReadBack == directory else { throw OnboardMemoryError.readBackFailed }
+        let readBack: Data
+        let directoryReadBack: Data
+        do {
+            try await writeSector(
+                profile, sector: targetSector, feature: feature, session: session
+            )
+            readBack = try await readSector(
+                targetSector, decoder: decoder, feature: feature, session: session,
+                size: snapshot.descriptor.readSize
+            )
+            guard readBack == profile, Self.sectorHasValidCRC(readBack) else {
+                throw OnboardMemoryError.readBackFailed
+            }
+
+            try await writeSector(
+                directory, sector: 0, feature: feature, session: session
+            )
+            directoryReadBack = try await readSector(
+                0, decoder: decoder, feature: feature, session: session,
+                size: snapshot.descriptor.readSize
+            )
+            guard directoryReadBack == directory else {
+                throw OnboardMemoryError.readBackFailed
+            }
+        } catch {
+            do {
+                try await writeSector(
+                    snapshot.sectors[1], sector: targetSector,
+                    feature: feature, session: session
+                )
+                let restored = try await readSector(
+                    targetSector, decoder: decoder, feature: feature, session: session,
+                    size: snapshot.descriptor.readSize
+                )
+                guard restored == snapshot.sectors[1] else {
+                    throw OnboardMemoryError.rollbackFailed
+                }
+            } catch {
+                throw OnboardMemoryError.rollbackFailed
+            }
+            throw error
+        }
 
         return G502OnboardProfileSnapshot(
             deviceFingerprint: snapshot.deviceFingerprint, capturedAt: Date(),
@@ -273,26 +385,47 @@ final class G502OnboardMemoryService {
         )
     }
 
-    private func readSector(_ sector: UInt16, decoder: G502C08DOnboardProfileSnapshotDecoder, transport: HIDPP42Transport, size: Int) async throws -> Data {
+    private func readSector(
+        _ sector: UInt16,
+        decoder: G502C08DOnboardProfileSnapshotDecoder,
+        feature: HIDPP42Transport.Feature,
+        session: HIDPPDeviceSessionProtocol,
+        size: Int
+    ) async throws -> Data {
         var bytes = Data(repeating: 0, count: size)
         for requestOffset in Self.readOffsets(sectorSize: size) {
             let request = decoder.memoryReadRequest(sector: sector, offset: UInt16(requestOffset))
-            let response = try await transport.readOnboardProfile(request, onboardFeatureIndex: decoder.featureIndex)
+            let response = try await session.call(
+                feature: feature,
+                function: request.functionID,
+                parameters: request.parameters
+            )
             let block = try G502C08DOnboardProfileSnapshotDecoder.sectorData(from: response, requestedSector: sector, offset: UInt16(requestOffset))
             bytes.replaceSubrange(requestOffset ..< requestOffset + 16, with: block)
         }
         return bytes
     }
 
-    private func writeSector(_ sectorData: Data, sector: UInt16, decoder: G502C08DOnboardProfileSnapshotDecoder, transport: HIDPP42Transport) async throws {
+    private func writeSector(
+        _ sectorData: Data,
+        sector: UInt16,
+        feature: HIDPP42Transport.Feature,
+        session: HIDPPDeviceSessionProtocol
+    ) async throws {
         // fn6 establishes target sector/offset/length, fn7 appends one 16-byte
         // chunk, fn8 commits the staged sector. These are the sector-model 0x8100
         // operations used by libratbag/Solaar.
+        let deviceIndex = await session.deviceIndex
         let packets = Self.writePackets(
-            sectorData: sectorData, sector: sector, featureIndex: decoder.featureIndex
+            sectorData: sectorData, sector: sector, featureIndex: feature.index,
+            deviceIndex: deviceIndex
         )
         for packet in packets {
-            _ = try await transport.writeVerifiedProfilePacket(packet)
+            _ = try await session.call(
+                feature: feature,
+                function: packet.functionID,
+                parameters: packet.parameters
+            )
         }
     }
 
@@ -407,6 +540,21 @@ final class G502OnboardMemoryService {
         sector.replaceSubrange(offset ..< offset + 4, with: [0xFF, 0, 0, 0])
     }
 
+    static func clearShortcutBindings(in sector: inout Data, buttonCount: Int) {
+        for bank in [
+            G502OnboardProfileSnapshot.ButtonAssignment.Bank.primary,
+            .gShift
+        ] {
+            for index in 0 ..< buttonCount {
+                let offset = buttonOffset(index: index, bank: bank)
+                guard sector.count >= offset + 4, sector[offset] == 0x80,
+                      sector[offset + 1] == 0x02 || sector[offset + 1] == 0x03
+                else { continue }
+                setDisabledBinding(in: &sector, index: index, bank: bank)
+            }
+        }
+    }
+
     static func setKeyboardBinding(
         in sector: inout Data,
         index: Int,
@@ -478,11 +626,10 @@ final class G502OnboardMemoryService {
 
     private func persistBackup(_ snapshot: G502OnboardProfileSnapshot) throws -> URL {
         let manager = FileManager.default
-        let directory = try manager.url(
+        let directory = try backupDirectory ?? manager.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true
-        )
-        .appendingPathComponent("MouseKy/Backups", isDirectory: true)
+        ).appendingPathComponent("MouseKy/Backups", isDirectory: true)
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
         let milliseconds = Int(snapshot.capturedAt.timeIntervalSince1970 * 1_000)
         let stem = "g502-\(milliseconds)-\(UUID().uuidString.prefix(8))"
@@ -518,6 +665,7 @@ final class G502OnboardMemoryService {
 
     enum OnboardMemoryError: LocalizedError, Equatable {
         case protocolNotVerified, invalidSectorCRC, invalidDirectory, noActiveProfile, invalidButton, readBackFailed
+        case rollbackFailed
         case unsupportedKeyboardKey
         case romProfileReadOnly
         case interfaceNotFound, firmwareUnavailable, onboardProfilesUnavailable, incompleteSnapshot, invalidProfileFormat
@@ -538,7 +686,9 @@ final class G502OnboardMemoryService {
             case .unsupportedKeyboardKey:
                 "This key cannot be represented as a standard HID keyboard shortcut."
             case .readBackFailed:
-                "The written sector did not match the verified read-back; no further writes were attempted."
+                "The written sector did not match the verified read-back; the backup was restored."
+            case .rollbackFailed:
+                "The written sector could not be verified and automatic restoration also failed."
             case .romProfileReadOnly:
                 "The active factory ROM profile cannot be modified or safely provisioned."
             case .interfaceNotFound:

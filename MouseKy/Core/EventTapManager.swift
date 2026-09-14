@@ -2,8 +2,6 @@ import AppKit
 import CoreGraphics
 
 final class EventTapManager {
-    var buttonHandler: ((Int) -> Void)?
-    var shortcutProvider: ((Int) -> KeyboardShortcut?)?
     var recorder: ShortcutRecorder?
 
     private var eventTap: CFMachPort?
@@ -12,13 +10,6 @@ final class EventTapManager {
 
     func start() -> Bool {
         guard eventTap == nil else { return true }
-        let mouseEvents: CGEventMask =
-            (1 << CGEventType.leftMouseDown.rawValue) |
-            (1 << CGEventType.leftMouseUp.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue) |
-            (1 << CGEventType.rightMouseUp.rawValue) |
-            (1 << CGEventType.otherMouseDown.rawValue) |
-            (1 << CGEventType.otherMouseUp.rawValue)
         let keyboardEvents: CGEventMask =
             (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -26,7 +17,7 @@ final class EventTapManager {
             tap: .cghidEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: mouseEvents | keyboardEvents,
+            eventsOfInterest: keyboardEvents,
             callback: Self.callback,
             userInfo: context
         ) else { return false }
@@ -63,23 +54,6 @@ final class EventTapManager {
         if type == .keyDown || type == .keyUp {
             return recorder?.handle(type: type, event: event) == true ? nil : Unmanaged.passUnretained(event)
         }
-        guard type == .leftMouseDown || type == .leftMouseUp ||
-              type == .rightMouseDown || type == .rightMouseUp ||
-              type == .otherMouseDown || type == .otherMouseUp
-        else { return Unmanaged.passUnretained(event) }
-
-        let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
-        if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
-            DispatchQueue.main.async { [weak self] in self?.buttonHandler?(button) }
-        }
-        guard button != 0, button != 1, let shortcut = shortcutProvider?(button) else {
-            return Unmanaged.passUnretained(event)
-        }
-        if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
-            ShortcutEmitter.post(shortcut, marker: syntheticEventMarker, isKeyDown: true)
-        } else {
-            ShortcutEmitter.post(shortcut, marker: syntheticEventMarker, isKeyDown: false)
-        }
-        return nil
+        return Unmanaged.passUnretained(event)
     }
 }

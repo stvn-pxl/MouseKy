@@ -12,6 +12,7 @@ final class HIDDeviceManager: ObservableObject {
     var buttonUsageHandler: ((Int) -> Void)?
     /// Receives all non-axis raw input reports for the selected device.
     var debugInputEventHandler: ((Int, Int, Int) -> Void)?
+    var devicesChangedHandler: (() -> Void)?
     private static let logger = Logger(subsystem: "com.local.MouseKy", category: "HID")
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     private var knownDevices: [ObjectIdentifier: ConnectedMouse] = [:]
@@ -70,7 +71,14 @@ final class HIDDeviceManager: ObservableObject {
     }
 
     private func publish() {
-        mice = knownDevices.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let uniqueMice = Dictionary(
+            knownDevices.values.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        mice = uniqueMice.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        devicesChangedHandler?()
     }
 
     private func makeMouse(from device: IOHIDDevice) -> ConnectedMouse? {
@@ -87,9 +95,18 @@ final class HIDDeviceManager: ObservableObject {
         let name: String = property(kIOHIDProductKey as CFString) ?? "Unknown Mouse"
         let manufacturer: String? = property(kIOHIDManufacturerKey as CFString)
         let serial: String? = property(kIOHIDSerialNumberKey as CFString)
+        let locationNumber: NSNumber? = property(kIOHIDLocationIDKey as CFString)
+        let location = locationNumber?.intValue
+        let transport: String = property(kIOHIDTransportKey as CFString) ?? "Unknown"
         return ConnectedMouse(
-            identifier: HIDDeviceIdentifier(vendorID: vendor.intValue, productID: product.intValue, serialNumber: serial),
-            name: name, manufacturer: manufacturer, isConnected: true
+            identifier: HIDDeviceIdentifier(
+                vendorID: vendor.intValue,
+                productID: product.intValue,
+                serialNumber: serial,
+                locationID: location
+            ),
+            name: name, manufacturer: manufacturer, isConnected: true,
+            connection: transport
         )
     }
 
@@ -135,7 +152,14 @@ final class HIDDeviceManager: ObservableObject {
               let product: NSNumber = property(kIOHIDProductIDKey as CFString)
         else { return nil }
         let serial: String? = property(kIOHIDSerialNumberKey as CFString)
-        return HIDDeviceIdentifier(vendorID: vendor.intValue, productID: product.intValue, serialNumber: serial)
+        let locationNumber: NSNumber? = property(kIOHIDLocationIDKey as CFString)
+        let location = locationNumber?.intValue
+        return HIDDeviceIdentifier(
+            vendorID: vendor.intValue,
+            productID: product.intValue,
+            serialNumber: serial,
+            locationID: location
+        )
     }
 
     private static func isPointerAxis(usagePage: Int, usage: Int) -> Bool {
