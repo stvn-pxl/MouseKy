@@ -1,8 +1,8 @@
 # MouseKy
 
-Native macOS 13+ menu-bar app for mapping mouse buttons to keyboard shortcuts. It uses
-`CGEventTap` to observe, block, and remap input, and `IOHIDManager` to discover connected
-pointing devices.
+Native macOS 15+ menu-bar app for app-specific mouse profiles. `IOHIDManager`
+discovers connected pointing devices, while `CGEventTap` is limited to keyboard
+shortcut recording.
 
 ## Build and run
 
@@ -29,16 +29,25 @@ make reinstall
 
 ## Using the app
 
-1. Choose **Scan Mice** and select the connected mouse to create or activate its profile.
+1. Choose **Scan Mice**, select a mouse for editing, then explicitly choose
+   **Als aktives Gerät verwenden**.
 2. Choose **Scan Buttons**, then click every button once.
 3. Click **Record Shortcut** beside a discovered extra button and press the desired combination.
 
-Left and right click are displayed but intentionally protected from remapping. Unmapped buttons are passed through unchanged.
+Left and right click are displayed but intentionally protected from remapping.
+Profiles can be assigned to running apps or application bundles; exactly one
+default profile handles macOS and all unassigned apps.
 
-## Important limitations
+## Logitech HID++ support
 
-- A `CGEventTap` only sees events macOS receives. Firmware-only buttons (often a DPI button) cannot be detected or overridden until the mouse firmware emits a macOS event.
-- `IOHIDManager` can identify connected devices, but `CGEventTap` does not attach every system event to a physical device. One active mapping profile is therefore used when several mice are connected.
+- Logitech G-Series devices are probed for HID++ `0x8110`; compatible MX
+  devices use temporary `0x1B04` control diversion.
+- MouseKy does not create a virtual mouse. Pointer movement, scrolling and
+  primary clicks remain on the device's native path.
+- Runtime button state is restored when MouseKy stops. App changes never write
+  onboard flash.
+- The hardware acceptance gates are documented in
+  [Docs/CoreHIDGate.md](Docs/CoreHIDGate.md).
 - The **G502 Onboard Profile** panel supports the directly connected `046D:C08D` G502 LIGHTSPEED. It uses macOS IOKit directly; no Logitech package or third-party driver is required. Quit G HUB before using it so the two applications do not compete for HID++ responses.
 - **Reload is read-only.** It dynamically discovers HID++ features `0x8100`/`0x1802`; Device Reset is never invoked. Backups (`.json`, `.bin`, manifest and SHA-256) are stored under `~/Library/Application Support/MouseKy/Backups/`.
 - Writes are allowlisted only for `046D:C08D`, firmware `MPM 17.00.B0008`, feature version `0`, and the exact known 11-button/255-byte layout. Other firmware and ROM profiles remain read-only.
