@@ -12,6 +12,7 @@ final class HIDDeviceManager: ObservableObject {
     var buttonUsageHandler: ((Int) -> Void)?
     /// Receives all non-axis raw input reports for the selected device.
     var debugInputEventHandler: ((Int, Int, Int) -> Void)?
+    var devicesChangedHandler: (() -> Void)?
     private static let logger = Logger(subsystem: "com.local.MouseKy", category: "HID")
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     private var knownDevices: [ObjectIdentifier: ConnectedMouse] = [:]
@@ -70,7 +71,14 @@ final class HIDDeviceManager: ObservableObject {
     }
 
     private func publish() {
-        mice = knownDevices.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let uniqueMice = Dictionary(
+            knownDevices.values.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        mice = uniqueMice.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        devicesChangedHandler?()
     }
 
     private func makeMouse(from device: IOHIDDevice) -> ConnectedMouse? {
@@ -82,15 +90,40 @@ final class HIDDeviceManager: ObservableObject {
               let usagePage: NSNumber = property(kIOHIDPrimaryUsagePageKey as CFString),
               let usage: NSNumber = property(kIOHIDPrimaryUsageKey as CFString),
               usagePage.intValue == kHIDPage_GenericDesktop,
-              usage.intValue == kHIDUsage_GD_Mouse
+              usage.intValue == kHIDUsage_GD_Mouse,
+              !declaresKeyboardKeys(device)
         else { return nil }
         let name: String = property(kIOHIDProductKey as CFString) ?? "Unknown Mouse"
         let manufacturer: String? = property(kIOHIDManufacturerKey as CFString)
         let serial: String? = property(kIOHIDSerialNumberKey as CFString)
+        let locationNumber: NSNumber? = property(kIOHIDLocationIDKey as CFString)
+        let location = locationNumber?.intValue
+        let transport: String = property(kIOHIDTransportKey as CFString) ?? "Unknown"
         return ConnectedMouse(
-            identifier: HIDDeviceIdentifier(vendorID: vendor.intValue, productID: product.intValue, serialNumber: serial),
-            name: name, manufacturer: manufacturer, isConnected: true
+            identifier: HIDDeviceIdentifier(
+                vendorID: vendor.intValue,
+                productID: product.intValue,
+                serialNumber: serial,
+                locationID: location
+            ),
+            name: name, manufacturer: manufacturer, isConnected: true,
+            connection: transport
         )
+    }
+
+    /// Some keyboards and macro pads expose a secondary Mouse collection for
+    /// mouse-key emulation. It is not a separately configurable pointing device,
+    /// so exclude a Mouse collection that also declares normal keyboard keys.
+    private func declaresKeyboardKeys(_ device: IOHIDDevice) -> Bool {
+        guard let elements = IOHIDDeviceCopyMatchingElements(
+            device, nil, IOOptionBits(kIOHIDOptionsTypeNone)
+        ) else {
+            return false
+        }
+        return (elements as NSArray).contains { value in
+            let element = value as! IOHIDElement
+            return IOHIDElementGetUsagePage(element) == 0x07
+        }
     }
 
     private static let deviceAdded: IOHIDDeviceCallback = { context, _, _, device in
@@ -135,7 +168,14 @@ final class HIDDeviceManager: ObservableObject {
               let product: NSNumber = property(kIOHIDProductIDKey as CFString)
         else { return nil }
         let serial: String? = property(kIOHIDSerialNumberKey as CFString)
-        return HIDDeviceIdentifier(vendorID: vendor.intValue, productID: product.intValue, serialNumber: serial)
+        let locationNumber: NSNumber? = property(kIOHIDLocationIDKey as CFString)
+        let location = locationNumber?.intValue
+        return HIDDeviceIdentifier(
+            vendorID: vendor.intValue,
+            productID: product.intValue,
+            serialNumber: serial,
+            locationID: location
+        )
     }
 
     private static func isPointerAxis(usagePage: Int, usage: Int) -> Bool {

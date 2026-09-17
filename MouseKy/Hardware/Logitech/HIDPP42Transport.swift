@@ -2,6 +2,27 @@ import Foundation
 import IOKit.hid
 import os
 
+private actor HIDPPRequestGate {
+    private var isLocked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isLocked {
+            isLocked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            isLocked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 /// HID++ 2.0/4.2 transport with serialized asynchronous requests.
 /// Responses are correlated by a random, non-zero software ID, so unsolicited
 /// reports can never complete an in-flight operation.
@@ -168,6 +189,11 @@ final class HIDPP42Transport: @unchecked Sendable {
     private var isDisconnected = false
     private var isDeviceOpen = false
     private var nextSoftwareID = UInt8.random(in: 1 ... 15)
+    private var notificationHandler: ((Packet) -> Void)?
+    private var disconnectionHandler: (() -> Void)?
+    private let requestGate = HIDPPRequestGate()
+
+    var addressedDeviceIndex: UInt8 { deviceIndex }
 
     init(device: IOHIDDevice, manager: IOHIDManager? = nil, deviceIndex: UInt8 = 0xFF) throws {
         self.device = device
@@ -190,12 +216,8 @@ final class HIDPP42Transport: @unchecked Sendable {
         try self.init(device: interface.device, manager: interface.manager, deviceIndex: deviceIndex)
     }
 
-    static func connect(interface: Interface) async throws -> HIDPP42Transport {
-        // C08D is connected directly by USB and HID++ addresses direct devices
-        // as 0xFF. Do not create temporary transports to probe receiver slots:
-        // IOHID holds the callback buffer pointer, so doing so can leave a stale
-        // callback pointing at a released buffer.
-        try HIDPP42Transport(interface: interface, deviceIndex: 0xFF)
+    static func connect(interface: Interface, deviceIndex: UInt8 = 0xFF) async throws -> HIDPP42Transport {
+        try HIDPP42Transport(interface: interface, deviceIndex: deviceIndex)
     }
 
     deinit {
@@ -217,7 +239,11 @@ final class HIDPP42Transport: @unchecked Sendable {
 
     /// Finds only a vendor interface with both HID++ short and long report IDs.
     /// It never assumes the regular mouse interface carries HID++.
-    static func discoverInterface(vendorID: Int, productID: Int) -> Interface? {
+    static func discoverInterface(
+        vendorID: Int,
+        productID: Int,
+        identifier: HIDDeviceIdentifier? = nil
+    ) -> Interface? {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matches: [[String: Any]] = [[
             kIOHIDVendorIDKey as String: vendorID,
@@ -229,6 +255,19 @@ final class HIDPP42Transport: @unchecked Sendable {
         }
         let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> ?? []
         let selected = devices.compactMap { device -> (Int, Interface)? in
+            let serial = IOHIDDeviceGetProperty(
+                device, kIOHIDSerialNumberKey as CFString
+            ) as? String
+            let location = (
+                IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber
+            )?.intValue
+            if let identifier {
+                if let expectedSerial = identifier.serialNumber, !expectedSerial.isEmpty {
+                    guard serial == expectedSerial else { return nil }
+                } else if let expectedLocation = identifier.locationID {
+                    guard location == expectedLocation else { return nil }
+                }
+            }
             guard let descriptor = IOHIDDeviceGetProperty(device, (kIOHIDReportDescriptorKey as NSString) as CFString) as? Data,
                   descriptorContainsHIDPPReports(descriptor)
             else { return nil }
@@ -279,12 +318,14 @@ final class HIDPP42Transport: @unchecked Sendable {
         return reportIDs.contains(0x10) && reportIDs.contains(longReportID)
     }
 
-    func featureLookupRequest(for featureID: UInt16) -> Packet {
-        Packet(deviceIndex: deviceIndex, featureIndex: Self.rootFeatureIndex, functionID: Self.rootGetFeatureFunction, parameters: Data([UInt8(featureID >> 8), UInt8(featureID & 0xFF)]))
+    func featureLookupRequest(for featureID: UInt16, deviceIndex: UInt8? = nil) -> Packet {
+        Packet(deviceIndex: deviceIndex ?? self.deviceIndex, featureIndex: Self.rootFeatureIndex, functionID: Self.rootGetFeatureFunction, parameters: Data([UInt8(featureID >> 8), UInt8(featureID & 0xFF)]))
     }
 
-    func lookupFeature(_ featureID: UInt16) async throws -> Feature? {
-        let response = try await requestResponse(featureLookupRequest(for: featureID))
+    func lookupFeature(_ featureID: UInt16, deviceIndex: UInt8? = nil) async throws -> Feature? {
+        let response = try await requestResponse(
+            featureLookupRequest(for: featureID, deviceIndex: deviceIndex)
+        )
         guard response.featureIndex == Self.rootFeatureIndex,
               response.functionID == Self.rootGetFeatureFunction,
               response.parameters.count >= 3
@@ -338,13 +379,37 @@ final class HIDPP42Transport: @unchecked Sendable {
         try await requestResponse(packet)
     }
 
+    func setNotificationHandler(_ handler: ((Packet) -> Void)?) {
+        lock.lock()
+        notificationHandler = handler
+        lock.unlock()
+    }
+
+    func setDisconnectionHandler(_ handler: (() -> Void)?) {
+        lock.lock()
+        disconnectionHandler = handler
+        lock.unlock()
+    }
+
     /// Restricted escape hatch used exclusively by the revision-gated service,
-    /// after it has a persisted backup and an explicit UI confirmation.
+    /// after an explicit UI confirmation.
     func writeVerifiedProfilePacket(_ packet: Packet) async throws -> Packet {
         try await requestResponse(packet)
     }
 
     private func requestResponse(_ original: Packet, timeout: TimeInterval = 2) async throws -> Packet {
+        await requestGate.acquire()
+        do {
+            let response = try await performRequestResponse(original, timeout: timeout)
+            await requestGate.release()
+            return response
+        } catch {
+            await requestGate.release()
+            throw error
+        }
+    }
+
+    private func performRequestResponse(_ original: Packet, timeout: TimeInterval) async throws -> Packet {
         let request = Packet(
             deviceIndex: original.deviceIndex, featureIndex: original.featureIndex,
             functionID: original.functionID, softwareID: allocateSoftwareID(),
@@ -442,7 +507,14 @@ final class HIDPP42Transport: @unchecked Sendable {
               packet.deviceIndex == expected.deviceIndex,
               packet.featureIndex == expected.featureIndex,
               packet.functionID == expected.functionID
-        else { lock.unlock(); return }
+        else {
+            let handler = notificationHandler
+            lock.unlock()
+            if packet.softwareID == 0 {
+                handler?(packet)
+            }
+            return
+        }
         pending = nil
         self.expected = nil
         lock.unlock()
@@ -486,8 +558,10 @@ final class HIDPP42Transport: @unchecked Sendable {
     func markDisconnected() {
         lock.lock()
         isDisconnected = true
+        let handler = disconnectionHandler
         lock.unlock()
         failPending(with: TransportError.disconnected)
+        handler?()
     }
 
     func decodeFeatureLookupResponse(_ report: Data, requestedFeatureID: UInt16) throws -> Feature? {

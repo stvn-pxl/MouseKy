@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose an improvement to MouseKy
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What limitation or user need should be addressed?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior rather than only the UI.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: hardware
+    attributes:
+      label: Relevant hardware
+      placeholder: Mouse model and firmware, or "not hardware-specific"
