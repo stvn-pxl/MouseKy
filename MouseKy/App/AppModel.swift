@@ -284,6 +284,8 @@ final class AppModel: ObservableObject {
             )
         }
         configuration.selectedDeviceID = mouse.id
+        configuration.managedDeviceID = mouse.id
+        hidDevices.activeMouseID = mouse.id
         recentlyPressedControlIDs.removeAll()
         onboardStatus = onboardMemory.status(for: mouse)
         onboardSnapshot = onboardSnapshotsByDeviceID[mouse.id]
@@ -557,11 +559,16 @@ final class AppModel: ObservableObject {
         }
         for device in configuration.devices {
             guard let mouse = connectedByID[device.id] else { continue }
+            let profile = effectiveProfile(for: device)
+            if let coordinator = inputCoordinators[device.id] {
+                coordinator.update(profile: profile)
+                continue
+            }
             let coordinator = coordinator(for: device.id)
             Task {
                 await coordinator.start(
                     mouse: mouse,
-                    profile: effectiveProfile(for: device)
+                    profile: profile
                 )
             }
         }
@@ -579,6 +586,12 @@ final class AppModel: ObservableObject {
             configuration.selectedDeviceID = firstMouse.id
             changed = true
         }
+        if configuration.managedDeviceID == nil,
+           let selectedDeviceID = configuration.selectedDeviceID {
+            configuration.managedDeviceID = selectedDeviceID
+            changed = true
+        }
+        hidDevices.activeMouseID = configuration.selectedDeviceID
         if changed {
             save()
         }

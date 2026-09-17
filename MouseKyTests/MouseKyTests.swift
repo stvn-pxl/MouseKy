@@ -63,6 +63,37 @@ final class MouseKyTests: XCTestCase {
         XCTAssertNotEqual(first.profiles.map(\.id), second.profiles.map(\.id))
     }
 
+    func testSeriallessDeviceIdentityIsStableAcrossPorts() {
+        let firstPort = HIDDeviceIdentifier(
+            vendorID: 0x046D, productID: 0xC08D, serialNumber: nil, locationID: 123
+        )
+        let secondPort = HIDDeviceIdentifier(
+            vendorID: 0x046D, productID: 0xC08D, serialNumber: nil, locationID: 456
+        )
+
+        XCTAssertEqual(firstPort.id, "1133:49293:")
+        XCTAssertEqual(firstPort.id, secondPort.id)
+    }
+
+    @MainActor
+    func testSelectingDeviceAlsoSelectsItForRawInput() {
+        let store = TestConfigurationStore(configuration: AppConfiguration())
+        let model = AppModel(store: store)
+        let mouse = ConnectedMouse(
+            identifier: HIDDeviceIdentifier(
+                vendorID: 0x046D, productID: 0xC08D, serialNumber: "selected"
+            ),
+            name: "G502", manufacturer: "Logitech", isConnected: true
+        )
+
+        model.selectDevice(mouse)
+
+        XCTAssertEqual(model.configuration.selectedDeviceID, mouse.id)
+        XCTAssertEqual(model.configuration.managedDeviceID, mouse.id)
+        XCTAssertEqual(model.hidDevices.activeMouseID, mouse.id)
+        XCTAssertEqual(model.managedDevice?.id, mouse.id)
+    }
+
     func testPrimaryButtonsCannotBeRemapped() {
         var profile = MouseProfile(
             name: "Test Mouse",

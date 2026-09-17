@@ -14,7 +14,7 @@ struct HIDDeviceIdentifier: Codable, Hashable, Identifiable {
     }
 
     var id: String {
-        let instance = serialNumber.flatMap { $0.isEmpty ? nil : $0 } ?? locationID.map(String.init) ?? ""
+        let instance = serialNumber.flatMap { $0.isEmpty ? nil : $0 } ?? ""
         return "\(vendorID):\(productID):\(instance)"
     }
 }
