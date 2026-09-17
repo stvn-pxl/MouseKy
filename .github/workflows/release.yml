@@ -15,12 +15,17 @@ jobs:
 
     env:
       ARCHIVE_PATH: .build-release/MouseKy.xcarchive
-      KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
-      P12_PATH: ${{ runner.temp }}/developer-id.p12
-      API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
 
     steps:
       - uses: actions/checkout@v5
+
+      - name: Configure temporary paths
+        run: |
+          {
+            echo "KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db"
+            echo "P12_PATH=$RUNNER_TEMP/developer-id.p12"
+            echo "API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8"
+          } >> "$GITHUB_ENV"
 
       - name: Validate tag
         run: |
@@ -137,7 +142,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "$DMG_PATH" \
-            "$DMG_PATH.sha256" \
+            ".build-release/MouseKy-$VERSION.dmg.sha256" \
             --title "MouseKy $VERSION" \
             --generate-notes \
             --verify-tag
