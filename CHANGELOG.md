@@ -12,7 +12,7 @@ All notable changes to MouseKy are documented here. The format follows
 - CI validation for builds and tests.
 - Automated signed, notarized Universal DMG releases.
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-09-17
 
 ### Added
 
