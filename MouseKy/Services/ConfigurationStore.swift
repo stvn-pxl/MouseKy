@@ -58,6 +58,6 @@ enum ConfigurationStoreError: LocalizedError {
     case newerSchemaIsReadOnly
 
     var errorDescription: String? {
-        "Die Konfiguration stammt aus einer neueren MouseKy-Version und wird nicht überschrieben."
+        "This configuration was created by a newer MouseKy version and will not be overwritten."
     }
 }

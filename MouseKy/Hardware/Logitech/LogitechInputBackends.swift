@@ -18,9 +18,9 @@ enum LogitechInputBackendError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .malformedResponse: "Das Logitech-Gerät lieferte eine ungültige HID++-Antwort."
-        case .verificationFailed: "Die temporäre Button-Konfiguration konnte nicht verifiziert werden."
-        case .unsupported: "Das Gerät bietet kein unterstütztes Logitech-Button-Feature."
+        case .malformedResponse: "The Logitech device returned an invalid HID++ response."
+        case .verificationFailed: "The temporary button configuration could not be verified."
+        case .unsupported: "The device does not provide a supported Logitech button feature."
         }
     }
 }
@@ -33,14 +33,20 @@ final class MouseButtonSpy8110Backend: LogitechInputBackend {
 
     private let session: HIDPPDeviceSessionProtocol
     private let feature: HIDPP42Transport.Feature
+    private let productID: Int
     private var originalTable = Data()
     private var appliedTable = Data()
     private var previousMask: UInt16 = 0
     private var isStarted = false
 
-    init(session: HIDPPDeviceSessionProtocol, feature: HIDPP42Transport.Feature) {
+    init(
+        session: HIDPPDeviceSessionProtocol,
+        feature: HIDPP42Transport.Feature,
+        productID: Int
+    ) {
         self.session = session
         self.feature = feature
+        self.productID = productID
     }
 
     func start(actions: [MouseControlID: MouseButtonAction]) async throws {
@@ -62,7 +68,10 @@ final class MouseButtonSpy8110Backend: LogitechInputBackend {
         controls = (0 ..< count).map { index in
             MouseControl(
                 id: .logitechButton(index),
-                name: Self.buttonName(index),
+                name: LogitechControlNames.buttonSpyName(
+                    productID: productID,
+                    index: index
+                ),
                 source: kind.rawValue,
                 isPrimary: index == 0 || index == 1,
                 isControllable: index > 1
@@ -145,14 +154,6 @@ final class MouseButtonSpy8110Backend: LogitechInputBackend {
         isStarted = false
     }
 
-    private static func buttonName(_ index: Int) -> String {
-        let names = [
-            "Linksklick", "Rechtsklick", "Mittelklick", "Zurück", "Vor",
-            "DPI-Umschaltung", "DPI herunter", "DPI hoch", "Batteriestatus",
-            "Rad rechts", "Rad links"
-        ]
-        return names.indices.contains(index) ? names[index] : "Taste \(index + 1)"
-    }
 }
 
 @MainActor
@@ -197,7 +198,7 @@ final class ReprogrammableControls1B04Backend: LogitechInputBackend {
             let isPrimary = cid == 0x0050 || cid == 0x0051
             discovered.append(.init(
                 id: .hidppControl(cid),
-                name: String(format: "Control 0x%04X", cid),
+                name: LogitechControlNames.hidppName(for: cid),
                 source: kind.rawValue,
                 isPrimary: isPrimary,
                 isControllable: flags & 0x20 != 0 && !isPrimary

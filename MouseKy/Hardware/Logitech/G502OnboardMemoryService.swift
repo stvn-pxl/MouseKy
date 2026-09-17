@@ -1,6 +1,5 @@
 import Foundation
 import IOKit.hid
-import CryptoKit
 
 struct G502OnboardProfileSnapshot: Codable, Equatable {
     struct ButtonAssignment: Codable, Equatable, Identifiable {
@@ -32,16 +31,10 @@ struct G502OnboardProfileSnapshot: Codable, Equatable {
     let warnings: [String]
 }
 
-/// Revision-gated access to G502 onboard memory. Probing and backup are read-only.
+/// Revision-gated access to G502 onboard memory. Probing is read-only.
 /// The write path has no default schema: an unknown firmware/profile layout cannot
 /// be reset merely because it shares the C08D USB product identifier.
 final class G502OnboardMemoryService {
-    private let backupDirectory: URL?
-
-    init(backupDirectory: URL? = nil) {
-        self.backupDirectory = backupDirectory
-    }
-
     struct ImportedBinding: Equatable {
         enum Kind: Equatable {
             case keyboard(KeyboardShortcut)
@@ -57,7 +50,6 @@ final class G502OnboardMemoryService {
         case unsupportedDevice
         case probing
         case readOnly(String)
-        case backupReady(String)
         case resetting
         case verified
         case failed(String)
@@ -66,7 +58,6 @@ final class G502OnboardMemoryService {
     static let logitechVendorID = 0x046D
     static let g502C08DProductID = 0xC08D
     private(set) var latestSnapshot: G502OnboardProfileSnapshot?
-    private(set) var latestBackupURL: URL?
     var canResetLatestSnapshot: Bool {
         guard let snapshot = latestSnapshot else { return false }
         return isWritable(snapshot)
@@ -102,16 +93,16 @@ final class G502OnboardMemoryService {
         guard mouse.identifier.vendorID == Self.logitechVendorID else { return .notLogitech }
         guard mouse.identifier.productID == Self.g502C08DProductID else { return .unsupportedDevice }
         return .readOnly(
-            "Connect and select this G502, then choose Reload to create a read-only onboard snapshot."
+            "Connect and select this G502, then choose Reload to inspect its onboard profile."
         )
     }
 
-    func probeAndBackup(mouse: ConnectedMouse) async throws -> G502OnboardProfileSnapshot {
+    func probe(mouse: ConnectedMouse) async throws -> G502OnboardProfileSnapshot {
         let session = try await HIDPPDeviceSession.connect(mouse: mouse)
-        return try await probeAndBackup(mouse: mouse, session: session)
+        return try await probe(mouse: mouse, session: session)
     }
 
-    func probeAndBackup(
+    func probe(
         mouse: ConnectedMouse,
         session: HIDPPDeviceSessionProtocol
     ) async throws -> G502OnboardProfileSnapshot {
@@ -206,7 +197,6 @@ final class G502OnboardMemoryService {
             warnings: warnings
         )
         latestSnapshot = snapshot
-        latestBackupURL = try persistBackup(snapshot)
         return snapshot
     }
 
@@ -217,7 +207,7 @@ final class G502OnboardMemoryService {
         mouseButton: Int?
     ) async throws -> G502OnboardProfileSnapshot {
         guard canResetLatestSnapshot else { throw OnboardMemoryError.protocolNotVerified }
-        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.backupRequired }
+        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.snapshotRequired }
         let session = try await HIDPPDeviceSession.connect(mouse: mouse)
         let updated = try await updating(
             mouse: mouse, session: session, snapshot: snapshot
@@ -240,7 +230,7 @@ final class G502OnboardMemoryService {
         shortcut: KeyboardShortcut
     ) async throws -> G502OnboardProfileSnapshot {
         guard canResetLatestSnapshot else { throw OnboardMemoryError.protocolNotVerified }
-        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.backupRequired }
+        guard let snapshot = latestSnapshot else { throw OnboardMemoryError.snapshotRequired }
         let session = try await HIDPPDeviceSession.connect(mouse: mouse)
         let updated = try await updating(
             mouse: mouse, session: session, snapshot: snapshot
@@ -304,7 +294,7 @@ final class G502OnboardMemoryService {
         mutate: (inout Data, Int) throws -> Void
     ) async throws -> G502OnboardProfileSnapshot {
         guard let activeSector = snapshot.activeProfileSector, snapshot.sectors.count >= 2
-        else { throw OnboardMemoryError.backupRequired }
+        else { throw OnboardMemoryError.snapshotRequired }
         guard snapshot.deviceFingerprint.hasPrefix("\(mouse.identifier.vendorID):\(mouse.identifier.productID):") else {
             throw OnboardMemoryError.snapshotBelongsToAnotherDevice
         }
@@ -314,7 +304,6 @@ final class G502OnboardMemoryService {
         guard Self.isVerifiedFirmware(snapshot.firmware), snapshot.onboardFeatureVersion == 0 else {
             throw OnboardMemoryError.protocolNotVerified
         }
-        latestBackupURL = try persistBackup(snapshot)
         var profile = snapshot.sectors[1]
         try mutate(&profile, min(Int(snapshot.descriptor.buttonCount), 16))
         Self.updateCRC(&profile)
@@ -624,41 +613,6 @@ final class G502OnboardMemoryService {
         sector[sector.count - 1] = UInt8(crc & 0xFF)
     }
 
-    private func persistBackup(_ snapshot: G502OnboardProfileSnapshot) throws -> URL {
-        let manager = FileManager.default
-        let directory = try backupDirectory ?? manager.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        ).appendingPathComponent("MouseKy/Backups", isDirectory: true)
-        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let milliseconds = Int(snapshot.capturedAt.timeIntervalSince1970 * 1_000)
-        let stem = "g502-\(milliseconds)-\(UUID().uuidString.prefix(8))"
-        let backupURL = directory.appendingPathComponent(stem).appendingPathExtension("json")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
-        try data.write(to: backupURL, options: .atomic)
-        let rawURL = directory.appendingPathComponent(stem).appendingPathExtension("bin")
-        try snapshot.sectors.reduce(into: Data()) { $0.append($1) }.write(to: rawURL, options: .atomic)
-        let rawData = snapshot.sectors.reduce(into: Data()) { $0.append($1) }
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let rawDigest = SHA256.hash(data: rawData).map { String(format: "%02x", $0) }.joined()
-        let manifest = [
-            "deviceFingerprint": snapshot.deviceFingerprint,
-            "schema": snapshot.descriptor.schemaIdentifier,
-            "firmware": snapshot.firmware.map(\.displayName).joined(separator: ", "),
-            "sha256": digest,
-            "rawSha256": rawDigest,
-            "snapshot": backupURL.lastPathComponent,
-            "rawSectors": rawURL.lastPathComponent,
-            "createdAt": ISO8601DateFormatter().string(from: snapshot.capturedAt),
-        ]
-        let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-        try manifestData.write(to: directory.appendingPathComponent(stem).appendingPathExtension("manifest.json"), options: .atomic)
-        return backupURL
-    }
-
     private func fingerprint(for mouse: ConnectedMouse, interfaceName: String?) -> String {
         "\(mouse.identifier.vendorID):\(mouse.identifier.productID):\(mouse.identifier.serialNumber ?? ""):\(interfaceName ?? "")"
     }
@@ -669,7 +623,7 @@ final class G502OnboardMemoryService {
         case unsupportedKeyboardKey
         case romProfileReadOnly
         case interfaceNotFound, firmwareUnavailable, onboardProfilesUnavailable, incompleteSnapshot, invalidProfileFormat
-        case backupRequired, snapshotBelongsToAnotherDevice
+        case snapshotRequired, snapshotBelongsToAnotherDevice
 
         var errorDescription: String? {
             switch self {
@@ -686,7 +640,7 @@ final class G502OnboardMemoryService {
             case .unsupportedKeyboardKey:
                 "This key cannot be represented as a standard HID keyboard shortcut."
             case .readBackFailed:
-                "The written sector did not match the verified read-back; the backup was restored."
+                "The written sector did not match the verified read-back; the original snapshot was restored."
             case .rollbackFailed:
                 "The written sector could not be verified and automatic restoration also failed."
             case .romProfileReadOnly:
@@ -701,10 +655,10 @@ final class G502OnboardMemoryService {
                 "The G502 did not return a complete onboard-profile snapshot."
             case .invalidProfileFormat:
                 "The reported onboard-profile format is invalid and remains read-only."
-            case .backupRequired:
-                "A complete snapshot and atomic backup are required before a reset can be considered."
+            case .snapshotRequired:
+                "A complete onboard profile snapshot is required before a reset can be considered."
             case .snapshotBelongsToAnotherDevice:
-                "The available backup does not belong to the selected G502."
+                "The available onboard profile snapshot does not belong to the selected G502."
             }
         }
     }

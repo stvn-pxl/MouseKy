@@ -155,6 +155,28 @@ private struct ProfileDetailView: View {
 
     var body: some View {
         Form {
+            Section("Device") {
+                LabeledContent("Name", value: device.name)
+                LabeledContent(
+                    "Manufacturer",
+                    value: connectedMouse?.manufacturer ?? "Unknown"
+                )
+                LabeledContent(
+                    "Connection",
+                    value: connectedMouse?.connection ?? "Disconnected"
+                )
+                if supportsC08DOnboardMemory {
+                    LabeledContent(
+                        "Onboard Shortcuts",
+                        value: "\(model.onboardShortcutCount)"
+                    )
+                    Button("Clear Onboard Shortcuts", role: .destructive) {
+                        isConfirmingOnboardClear = true
+                    }
+                    .disabled(!model.canResetOnboardProfile || model.onboardShortcutCount == 0)
+                }
+            }
+
             Section("Profile") {
                 HStack {
                     Picker("Profile", selection: Binding(
@@ -170,15 +192,9 @@ private struct ProfileDetailView: View {
                     }
                     .help("Add Profile")
                 }
-                LabeledContent("Device", value: device.name)
-                LabeledContent(
-                    "Verbindung",
-                    value: model.hidDevices.mice.first(where: { $0.id == device.id })?
-                        .connection ?? "Getrennt"
-                )
                 HStack {
                     if !profile.isDefault {
-                        Button("Als Default setzen") {
+                        Button("Set as Default") {
                             model.setSelectedProfileAsDefault()
                         }
                     }
@@ -225,7 +241,7 @@ private struct ProfileDetailView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .help("App hinzufügen")
+                        .help("Add App")
                         .popover(isPresented: $isShowingAddMenu, arrowEdge: .top) {
                             VStack(alignment: .leading, spacing: 4) {
                                 ScrollView {
@@ -243,14 +259,14 @@ private struct ProfileDetailView: View {
                                 }
                                 .frame(maxHeight: 240)
                                 Divider()
-                                Button("Global verwenden") {
+                                Button("Use Globally") {
                                     model.setSelectedProfileAsDefault()
                                     isShowingAddMenu = false
                                 }
                                 .disabled(profile.isDefault)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                Button("Weitere Apps hinzufügen…") {
+                                Button("Add More Apps…") {
                                     isShowingAddMenu = false
                                     chooseApplications()
                                 }
@@ -279,31 +295,11 @@ private struct ProfileDetailView: View {
                 }
             }
 
-            if !isG502 {
+            if model.shouldShowButtonScan {
                 Section {
                     Button(model.scanner.isScanning ? "Finish Button Scan" : "Scan Buttons") {
                         model.scanner.isScanning ? model.stopScan() : model.startScan()
                     }
-                }
-            } else {
-                Section("G502 Onboard-Speicher") {
-                    Text(model.onboardStatusText)
-                    LabeledContent(
-                        "Onboard-Shortcuts",
-                        value: "\(model.onboardShortcutCount)"
-                    )
-                    Button("Neu einlesen und sichern") {
-                        model.reloadOnboardProfile()
-                    }
-                    Button("Onboard-Shortcuts löschen", role: .destructive) {
-                        isConfirmingOnboardClear = true
-                    }
-                    .disabled(!model.canResetOnboardProfile || model.onboardShortcutCount == 0)
-                    if let backupURL = model.onboardBackupURL {
-                        LabeledContent("Recovery-Artefakt", value: backupURL.path)
-                    }
-                    Text("Es werden ausschließlich Tastatur- und Medienbelegungen entfernt. Maus-, DPI- und Gerätefunktionen bleiben erhalten.")
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -317,40 +313,44 @@ private struct ProfileDetailView: View {
         .buttonStyle(.bordered)
         .navigationTitle(device.name)
         .confirmationDialog(
-            "App-Zuordnung verschieben?",
+            "Move App Assignment?",
             isPresented: Binding(
                 get: { pendingAssignment != nil },
                 set: { if !$0 { pendingAssignment = nil } }
             ),
             presenting: pendingAssignment
         ) { assignment in
-            Button("Aus „\(assignment.sourceProfileName)“ verschieben") {
+            Button("Move from “\(assignment.sourceProfileName)”") {
                 model.assignApplication(
                     bundleIdentifier: assignment.bundleIdentifier,
                     confirmMove: true
                 )
                 pendingAssignment = nil
             }
-            Button("Abbrechen", role: .cancel) {
+            Button("Cancel", role: .cancel) {
                 pendingAssignment = nil
             }
         } message: { assignment in
-            Text("Diese App ist bereits dem Profil „\(assignment.sourceProfileName)“ zugeordnet.")
+            Text("This app is already assigned to the “\(assignment.sourceProfileName)” profile.")
         }
         .confirmationDialog(
-            "Onboard-Shortcuts wirklich löschen?",
+            "Clear Onboard Shortcuts?",
             isPresented: $isConfirmingOnboardClear
         ) {
-            Button("Onboard-Shortcuts löschen", role: .destructive) {
+            Button("Clear Onboard Shortcuts", role: .destructive) {
                 model.clearOnboardShortcuts()
             }
-            Button("Abbrechen", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("MouseKy sichert das aktuelle Profil und entfernt nur Tastatur- und Medienbelegungen.")
+            Text("Only keyboard and media assignments will be removed. Mouse, DPI, and device functions remain unchanged.")
         }
     }
 
-    private var isG502: Bool {
+    private var connectedMouse: ConnectedMouse? {
+        model.hidDevices.mice.first { $0.id == device.id }
+    }
+
+    private var supportsC08DOnboardMemory: Bool {
         device.identifier.vendorID == G502OnboardMemoryService.logitechVendorID &&
             device.identifier.productID == G502OnboardMemoryService.g502C08DProductID
     }
@@ -430,7 +430,7 @@ private struct AppAssignmentIcon: View {
         }
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Entfernen", role: .destructive, action: onRemove)
+            Button("Remove", role: .destructive, action: onRemove)
         }
         .help(bundleIdentifier)
     }
@@ -463,7 +463,7 @@ private struct AllAppsIcon: View {
                 .lineLimit(1)
                 .frame(width: 72)
         }
-        .help("Alle nicht explizit zugeordneten Apps")
+        .help("All apps without an explicit assignment")
     }
 }
 
@@ -474,13 +474,15 @@ private struct MappingRow: View {
     var body: some View {
         let control = model.control(for: mapping)
         let isPrimary = control?.isPrimary ?? mapping.isPrimaryButton
+        let isRecentlyPressed = model.wasRecentlyPressed(mapping.controlID)
         HStack {
             Text(model.displayName(for: mapping))
+                .foregroundStyle(isRecentlyPressed ? .green : .primary)
             Spacer()
             if !isPrimary {
                 if model.isBlockedByOnboardAssignment(mapping.controlID) {
                     Label(
-                        "Onboard-Belegung zuerst löschen",
+                        "Clear Onboard Assignment First",
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.secondary)

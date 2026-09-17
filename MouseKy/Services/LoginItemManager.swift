@@ -25,7 +25,7 @@ final class LoginItemManager: ObservableObject {
             }
             errorMessage = nil
         } catch {
-            errorMessage = "Login-Item konnte nicht geändert werden: \(error.localizedDescription)"
+            errorMessage = "The login item could not be changed: \(error.localizedDescription)"
         }
         refresh()
     }

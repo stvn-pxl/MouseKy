@@ -90,7 +90,8 @@ final class HIDDeviceManager: ObservableObject {
               let usagePage: NSNumber = property(kIOHIDPrimaryUsagePageKey as CFString),
               let usage: NSNumber = property(kIOHIDPrimaryUsageKey as CFString),
               usagePage.intValue == kHIDPage_GenericDesktop,
-              usage.intValue == kHIDUsage_GD_Mouse
+              usage.intValue == kHIDUsage_GD_Mouse,
+              !declaresKeyboardKeys(device)
         else { return nil }
         let name: String = property(kIOHIDProductKey as CFString) ?? "Unknown Mouse"
         let manufacturer: String? = property(kIOHIDManufacturerKey as CFString)
@@ -108,6 +109,21 @@ final class HIDDeviceManager: ObservableObject {
             name: name, manufacturer: manufacturer, isConnected: true,
             connection: transport
         )
+    }
+
+    /// Some keyboards and macro pads expose a secondary Mouse collection for
+    /// mouse-key emulation. It is not a separately configurable pointing device,
+    /// so exclude a Mouse collection that also declares normal keyboard keys.
+    private func declaresKeyboardKeys(_ device: IOHIDDevice) -> Bool {
+        guard let elements = IOHIDDeviceCopyMatchingElements(
+            device, nil, IOOptionBits(kIOHIDOptionsTypeNone)
+        ) else {
+            return false
+        }
+        return (elements as NSArray).contains { value in
+            let element = value as! IOHIDElement
+            return IOHIDElementGetUsagePage(element) == 0x07
+        }
     }
 
     private static let deviceAdded: IOHIDDeviceCallback = { context, _, _, device in

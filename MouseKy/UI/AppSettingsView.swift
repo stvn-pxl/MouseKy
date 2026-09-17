@@ -32,9 +32,9 @@ struct AppSettingsView: View {
                     }
                 }
             }
-            Section("Systemstart") {
+            Section("Startup") {
                 Toggle(
-                    "MouseKy bei der Anmeldung öffnen",
+                    "Open MouseKy at Login",
                     isOn: Binding(
                         get: { model.loginItem.isEnabled },
                         set: { model.loginItem.setEnabled($0) }
@@ -46,8 +46,8 @@ struct AppSettingsView: View {
                 }
             }
             Section("Logitech HID++") {
-                LabeledContent("Runtime-Backend", value: model.backendStatus.displayText)
-                Text("G HUB oder Options+ muss beendet sein, wenn es das gleiche HID++-Interface exklusiv verwendet.")
+                LabeledContent("Runtime Backend", value: model.backendStatus.displayText)
+                Text("G HUB or Options+ must be closed if it uses the same HID++ interface exclusively.")
                     .foregroundStyle(.secondary)
             }
         }

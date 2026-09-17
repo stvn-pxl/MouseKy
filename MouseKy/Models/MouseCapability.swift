@@ -61,12 +61,12 @@ enum MouseBackendStatus: Equatable {
 
     var displayText: String {
         switch self {
-        case .idle: "Inaktiv"
-        case .probing: "Logitech-Funktionen werden geprüft …"
-        case let .active(kind): "Aktiv über \(kind.rawValue)"
-        case let .unsupported(reason): "Nicht unterstützt: \(reason)"
-        case let .blocked(reason): "Blockiert: \(reason)"
-        case let .failed(reason): "Fehler: \(reason)"
+        case .idle: "Inactive"
+        case .probing: "Checking Logitech Features…"
+        case let .active(kind): "Active via \(kind.rawValue)"
+        case let .unsupported(reason): "Unsupported: \(reason)"
+        case let .blocked(reason): "Blocked: \(reason)"
+        case let .failed(reason): "Error: \(reason)"
         }
     }
 }

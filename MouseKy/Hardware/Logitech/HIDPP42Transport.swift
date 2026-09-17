@@ -392,7 +392,7 @@ final class HIDPP42Transport: @unchecked Sendable {
     }
 
     /// Restricted escape hatch used exclusively by the revision-gated service,
-    /// after it has a persisted backup and an explicit UI confirmation.
+    /// after an explicit UI confirmation.
     func writeVerifiedProfilePacket(_ packet: Packet) async throws -> Packet {
         try await requestResponse(packet)
     }

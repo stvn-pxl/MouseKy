@@ -465,6 +465,114 @@ final class MouseKyTests: XCTestCase {
     }
 
     @MainActor
+    func testVisibleMappingsPreferHIDPPControlsWithoutMergingHIDFallback() {
+        let profile = MouseProfile(
+            name: "Runtime",
+            mappings: [
+                MouseMapping(buttonNumber: 4, shortcut: nil),
+                MouseMapping(controlID: .hidppControl(0x0053), action: .disabled)
+            ]
+        )
+        let controls = [
+            MouseControl(
+                id: .hidppControl(0x0053),
+                name: "Control 0x0053",
+                source: LogitechBackendKind.reprogrammableControls1B04.rawValue,
+                isPrimary: false,
+                isControllable: true
+            )
+        ]
+
+        let mappings = AppModel.visibleMappings(
+            for: profile,
+            controls: controls,
+            fallbackButtonNumbers: [0, 1, 2, 3, 4]
+        )
+
+        XCTAssertEqual(mappings.map(\.controlID), [.hidppControl(0x0053)])
+        XCTAssertEqual(mappings.first?.action, .disabled)
+    }
+
+    func testLogitechControlNamesResolveKnownAndUnknownCIDs() {
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0x0053), "Back")
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0x00C3), "Gesture Button")
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0x0056), "Forward")
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0x0057), "Forward")
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0x0058), "Forward")
+        XCTAssertEqual(LogitechControlNames.hidppName(for: 0xBEEF), "Button 0xBEEF")
+    }
+
+    func testButtonSpyNamesAreAllowlistedPerProduct() {
+        XCTAssertEqual(
+            LogitechControlNames.buttonSpyName(productID: 0xC08B, index: 8),
+            "Wheel Tilt Left"
+        )
+        XCTAssertEqual(
+            LogitechControlNames.buttonSpyName(productID: 0xC08D, index: 8),
+            "Battery Status"
+        )
+        XCTAssertEqual(
+            LogitechControlNames.buttonSpyName(productID: 0xFFFF, index: 8),
+            "Button 9"
+        )
+    }
+
+    @MainActor
+    func testButtonScanVisibilityRequiresActiveHIDPPControls() {
+        let control = MouseControl(
+            id: .logitechButton(2),
+            name: "Mittelklick",
+            source: LogitechBackendKind.buttonSpy8110.rawValue,
+            isPrimary: false,
+            isControllable: true
+        )
+
+        XCTAssertFalse(AppModel.shouldShowButtonScan(
+            status: .active(.buttonSpy8110),
+            controls: [control]
+        ))
+        XCTAssertTrue(AppModel.shouldShowButtonScan(
+            status: .active(.buttonSpy8110),
+            controls: []
+        ))
+        XCTAssertTrue(AppModel.shouldShowButtonScan(
+            status: .unsupported("No supported feature"),
+            controls: []
+        ))
+        XCTAssertTrue(AppModel.shouldShowButtonScan(
+            status: .failed("Verbindung fehlgeschlagen"),
+            controls: []
+        ))
+    }
+
+    @MainActor
+    func testWiredG502WithDifferentProductIDUsesDiscoveredHIDPPBackend() async {
+        let feature = HIDPP42Transport.Feature(
+            identifier: 0x1B04, index: 7, type: 0, version: 4
+        )
+        let session = MockHIDPPSession(features: [0x1B04: feature])
+        session.reprogrammableControls = [
+            Data([0x00, 0x53, 0, 0, 0x20, 0, 1, 1])
+        ]
+        let coordinator = MouseInputCoordinator(
+            sessionFactory: { _ in session },
+            emitter: ShortcutEmitter.State()
+        )
+        let mouse = ConnectedMouse(
+            identifier: .init(
+                vendorID: 0x046D, productID: 0xC08B, serialNumber: "wired"
+            ),
+            name: "G502 Wired", manufacturer: "Logitech", isConnected: true
+        )
+
+        await coordinator.start(mouse: mouse, profile: nil)
+
+        XCTAssertEqual(coordinator.status, .active(.reprogrammableControls1B04))
+        XCTAssertEqual(coordinator.controls.map(\.id), [.hidppControl(0x0053)])
+        await coordinator.stop()
+    }
+
+    @MainActor
     func testButtonSpyBackendFiltersVerifiesEmitsAndRestores() async throws {
         let feature = HIDPP42Transport.Feature(
             identifier: 0x8110, index: 9, type: 0, version: 0
@@ -473,7 +581,11 @@ final class MouseKyTests: XCTestCase {
             features: [0x8110: feature],
             buttonSpyTable: Data([1, 2, 3] + Array(repeating: 0, count: 13))
         )
-        let backend = MouseButtonSpy8110Backend(session: session, feature: feature)
+        let backend = MouseButtonSpy8110Backend(
+            session: session,
+            feature: feature,
+            productID: 0xC08D
+        )
         var events: [MouseControlEvent] = []
         backend.onEvent = { events.append($0) }
         let shortcut = KeyboardShortcut(keyCode: 1, modifiers: 0)
@@ -547,10 +659,7 @@ final class MouseKyTests: XCTestCase {
             0: fixture.snapshot.sectors[0],
             1: fixture.snapshot.sectors[1]
         ]
-        let service = G502OnboardMemoryService(
-            backupDirectory: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-        )
+        let service = G502OnboardMemoryService()
 
         let updated = try await service.clearShortcutAssignments(
             mouse: fixture.mouse, session: session, snapshot: fixture.snapshot
@@ -563,7 +672,7 @@ final class MouseKyTests: XCTestCase {
     }
 
     @MainActor
-    func testClearOnboardShortcutsRestoresBackupAfterReadBackFailure() async throws {
+    func testClearOnboardShortcutsRestoresSnapshotAfterReadBackFailure() async throws {
         let fixture = try makeWritableOnboardFixture()
         let feature = HIDPP42Transport.Feature(
             identifier: 0x8100, index: 6, type: 0, version: 0
@@ -574,10 +683,7 @@ final class MouseKyTests: XCTestCase {
             1: fixture.snapshot.sectors[1]
         ]
         session.corruptNextOnboardRead = true
-        let service = G502OnboardMemoryService(
-            backupDirectory: FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-        )
+        let service = G502OnboardMemoryService()
 
         do {
             _ = try await service.clearShortcutAssignments(

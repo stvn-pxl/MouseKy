@@ -28,12 +28,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var hidDebugEvents: [HIDDebugEvent] = []
     @Published private(set) var onboardStatus: G502OnboardMemoryService.Status = .readOnly("Select a supported G502 to inspect its onboard profile.")
     @Published private(set) var onboardSnapshot: G502OnboardProfileSnapshot?
-    @Published private(set) var onboardBackupURL: URL?
     @Published private(set) var canResetOnboardProfile = false
     @Published private(set) var onboardShortcutCount = 0
     @Published private(set) var foregroundBundleIdentifier: String?
     @Published private(set) var backendStatuses: [String: MouseBackendStatus] = [:]
     @Published private(set) var availableControlsByDeviceID: [String: [MouseControl]] = [:]
+    @Published private(set) var recentlyPressedControlIDs = Set<MouseControlID>()
 
     let scanner = MouseButtonScanner()
     let hidDevices = HIDDeviceManager()
@@ -47,7 +47,6 @@ final class AppModel: ObservableObject {
     private var inputCoordinators: [String: MouseInputCoordinator] = [:]
     private var inputSessions: [String: HIDPPDeviceSessionProtocol] = [:]
     private var onboardSnapshotsByDeviceID: [String: G502OnboardProfileSnapshot] = [:]
-    private var onboardBackupURLsByDeviceID: [String: URL] = [:]
     private var hasInitialized = false
 
     init(
@@ -103,6 +102,18 @@ final class AppModel: ObservableObject {
         return availableControlsByDeviceID[selectedDeviceID] ?? []
     }
 
+    var shouldShowButtonScan: Bool {
+        Self.shouldShowButtonScan(status: backendStatus, controls: availableControls)
+    }
+
+    static func shouldShowButtonScan(
+        status: MouseBackendStatus,
+        controls: [MouseControl]
+    ) -> Bool {
+        guard case .active = status else { return true }
+        return controls.isEmpty
+    }
+
     func effectiveProfile(for device: MouseDeviceConfiguration) -> MouseProfile {
         EffectiveProfileResolver.resolve(
             device: device,
@@ -112,14 +123,13 @@ final class AppModel: ObservableObject {
 
     var onboardStatusText: String {
         switch onboardStatus {
-        case .notLogitech: "Kein Logitech-Gerät"
-        case .unsupportedDevice: "Dieses Logitech-Gerät wird nicht unterstützt"
-        case .probing: "Onboard-Speicher wird gelesen und gesichert …"
+        case .notLogitech: "Not a Logitech Device"
+        case .unsupportedDevice: "This Logitech Device Is Not Supported"
+        case .probing: "Reading Onboard Memory…"
         case let .readOnly(message): message
-        case let .backupReady(path): "Backup bereit: \(path)"
-        case .resetting: "Onboard-Profil wird aktualisiert …"
-        case .verified: "Onboard-Profil wurde per Read-back verifiziert"
-        case let .failed(message): "Fehler: \(message)"
+        case .resetting: "Updating Onboard Profile…"
+        case .verified: "Onboard Profile Verified by Read-Back"
+        case let .failed(message): "Error: \(message)"
         }
     }
 
@@ -152,23 +162,35 @@ final class AppModel: ObservableObject {
     }
 
     func visibleMappings(for profile: MouseProfile) -> [MouseMapping] {
-        if !availableControls.isEmpty {
-            return availableControls.map { control in
+        let fallbackButtonNumbers: [Int]
+        if selectedDevice?.identifier.vendorID == G502OnboardMemoryService.logitechVendorID,
+           selectedDevice?.identifier.productID == G502OnboardMemoryService.g502C08DProductID {
+            let count = onboardSnapshot.map { Int($0.descriptor.buttonCount) } ?? 11
+            fallbackButtonNumbers = Array(0 ..< count)
+        } else {
+            fallbackButtonNumbers = selectedDevice.flatMap {
+                hidDevices.declaredButtonNumbersByMouseID[$0.id]
+            } ?? profile.mappings.map(\.buttonNumber)
+        }
+        return Self.visibleMappings(
+            for: profile,
+            controls: availableControls,
+            fallbackButtonNumbers: fallbackButtonNumbers
+        )
+    }
+
+    static func visibleMappings(
+        for profile: MouseProfile,
+        controls: [MouseControl],
+        fallbackButtonNumbers: [Int]
+    ) -> [MouseMapping] {
+        if !controls.isEmpty {
+            return controls.map { control in
                 profile.mappings.first(where: { $0.controlID == control.id }) ??
                     MouseMapping(controlID: control.id)
             }
         }
-        let buttonNumbers: [Int]
-        if selectedDevice?.identifier.vendorID == G502OnboardMemoryService.logitechVendorID,
-           selectedDevice?.identifier.productID == G502OnboardMemoryService.g502C08DProductID {
-            let count = onboardSnapshot.map { Int($0.descriptor.buttonCount) } ?? 11
-            buttonNumbers = Array(0 ..< count)
-        } else {
-            buttonNumbers = selectedDevice.flatMap {
-                hidDevices.declaredButtonNumbersByMouseID[$0.id]
-            } ?? profile.mappings.map(\.buttonNumber)
-        }
-        return buttonNumbers.map { number in
+        return fallbackButtonNumbers.map { number in
             profile.mappings.first(where: { $0.buttonNumber == number }) ??
                 MouseMapping(buttonNumber: number, shortcut: nil)
         }
@@ -187,6 +209,10 @@ final class AppModel: ObservableObject {
         availableControls.first { $0.id == mapping.controlID }
     }
 
+    func wasRecentlyPressed(_ controlID: MouseControlID) -> Bool {
+        recentlyPressedControlIDs.contains(controlID)
+    }
+
     func displayName(for mapping: MouseMapping) -> String {
         if let control = control(for: mapping) {
             return control.name
@@ -203,16 +229,14 @@ final class AppModel: ObservableObject {
         onboardStatus = .probing
         Task {
             do {
-                let snapshot = try await onboardMemory.probeAndBackup(
+                let snapshot = try await onboardMemory.probe(
                     mouse: mouse, session: session
                 )
                 updateOnboardState(snapshot, for: mouse.id)
-                onboardBackupURL = onboardMemory.latestBackupURL
                 canResetOnboardProfile = onboardMemory.isWritable(snapshot)
-                onboardStatus = .backupReady(onboardMemory.latestBackupURL?.path ?? "")
+                onboardStatus = .verified
             } catch {
                 onboardSnapshot = nil
-                onboardBackupURL = nil
                 canResetOnboardProfile = false
                 onboardShortcutCount = 0
                 onboardStatus = .failed(error.localizedDescription)
@@ -260,12 +284,12 @@ final class AppModel: ObservableObject {
             )
         }
         configuration.selectedDeviceID = mouse.id
+        recentlyPressedControlIDs.removeAll()
         onboardStatus = onboardMemory.status(for: mouse)
         onboardSnapshot = onboardSnapshotsByDeviceID[mouse.id]
         onboardShortcutCount = onboardSnapshot.map {
             onboardMemory.importedBindings(from: $0).count
         } ?? 0
-        onboardBackupURL = onboardBackupURLsByDeviceID[mouse.id]
         canResetOnboardProfile = onboardSnapshot.map(onboardMemory.isWritable) ?? false
         save()
         synchronizeInputs()
@@ -528,7 +552,6 @@ final class AppModel: ObservableObject {
             inputCoordinators.removeValue(forKey: deviceID)
             inputSessions.removeValue(forKey: deviceID)
             onboardSnapshotsByDeviceID.removeValue(forKey: deviceID)
-            onboardBackupURLsByDeviceID.removeValue(forKey: deviceID)
             backendStatuses.removeValue(forKey: deviceID)
             availableControlsByDeviceID.removeValue(forKey: deviceID)
         }
@@ -565,10 +588,18 @@ final class AppModel: ObservableObject {
         if let coordinator = inputCoordinators[deviceID] { return coordinator }
         let coordinator = MouseInputCoordinator(emitter: shortcutEmitter)
         coordinator.onStatusChanged = { [weak self] status in
-            self?.backendStatuses[deviceID] = status
+            guard let self else { return }
+            self.backendStatuses[deviceID] = status
+            if self.configuration.selectedDeviceID == deviceID,
+               !self.shouldShowButtonScan {
+                self.scanner.stop()
+            }
         }
         coordinator.onControlsChanged = { [weak self] controls in
             self?.availableControlsByDeviceID[deviceID] = controls
+        }
+        coordinator.onControlEvent = { [weak self] event in
+            self?.updatePressedControl(event, for: deviceID)
         }
         coordinator.prepareSession = { [weak self] session in
             guard let self,
@@ -583,6 +614,16 @@ final class AppModel: ObservableObject {
         return coordinator
     }
 
+    private func updatePressedControl(_ event: MouseControlEvent, for deviceID: String) {
+        guard configuration.selectedDeviceID == deviceID else { return }
+        switch event.phase {
+        case .down:
+            recentlyPressedControlIDs.insert(event.controlID)
+        case .up:
+            recentlyPressedControlIDs.remove(event.controlID)
+        }
+    }
+
     private func prepareOnboard(
         mouse: ConnectedMouse,
         session: HIDPPDeviceSessionProtocol
@@ -593,7 +634,7 @@ final class AppModel: ObservableObject {
             return .init(profile: profile, blockedControls: [])
         }
         do {
-            let snapshot = try await onboardMemory.probeAndBackup(mouse: mouse, session: session)
+            let snapshot = try await onboardMemory.probe(mouse: mouse, session: session)
             updateOnboardState(snapshot, for: mouse.id)
             let bindings = onboardMemory.importedBindings(from: snapshot)
             let conflicts = Set(bindings.map(\.controlID))
@@ -628,15 +669,11 @@ final class AppModel: ObservableObject {
         for deviceID: String
     ) {
         onboardSnapshotsByDeviceID[deviceID] = snapshot
-        if let backupURL = onboardMemory.latestBackupURL {
-            onboardBackupURLsByDeviceID[deviceID] = backupURL
-        }
         guard configuration.selectedDeviceID == deviceID else { return }
         onboardSnapshot = snapshot
         onboardShortcutCount = onboardMemory.importedBindings(from: snapshot).count
         canResetOnboardProfile = onboardMemory.isWritable(snapshot)
-        onboardBackupURL = onboardBackupURLsByDeviceID[deviceID]
-        onboardStatus = .backupReady(onboardMemory.latestBackupURL?.path ?? "")
+        onboardStatus = .verified
     }
 
     private static let g502ButtonNames: [Int: String] = [

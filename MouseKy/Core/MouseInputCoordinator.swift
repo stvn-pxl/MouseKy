@@ -16,6 +16,7 @@ final class MouseInputCoordinator {
     }
     var onStatusChanged: ((MouseBackendStatus) -> Void)?
     var onControlsChanged: (([MouseControl]) -> Void)?
+    var onControlEvent: ((MouseControlEvent) -> Void)?
     var prepareSession: ((HIDPPDeviceSessionProtocol) async -> SessionPreparation)?
 
     private let sessionFactory: SessionFactory
@@ -46,7 +47,7 @@ final class MouseInputCoordinator {
         let currentGeneration = generation
         await stopCurrent()
         guard mouse.identifier.vendorID == HIDPPDeviceSession.logitechVendorID else {
-            status = .unsupported("MouseKy unterstützt derzeit ausschließlich Logitech HID++.")
+            status = .unsupported("MouseKy currently supports Logitech HID++ only.")
             return
         }
         status = .probing
@@ -66,13 +67,17 @@ final class MouseInputCoordinator {
             }
             let selectedBackend: LogitechInputBackend
             if let feature = try await session.feature(0x8110) {
-                selectedBackend = MouseButtonSpy8110Backend(session: session, feature: feature)
+                selectedBackend = MouseButtonSpy8110Backend(
+                    session: session,
+                    feature: feature,
+                    productID: mouse.identifier.productID
+                )
             } else if let feature = try await session.feature(0x1B04) {
                 selectedBackend = ReprogrammableControls1B04Backend(
                     session: session, feature: feature
                 )
             } else {
-                status = .unsupported("Kein HID++ 0x8110- oder 0x1B04-Feature gefunden.")
+                status = .unsupported("No HID++ 0x8110 or 0x1B04 feature was found.")
                 return
             }
             selectedBackend.onEvent = { [weak self] event in self?.handle(event) }
@@ -133,12 +138,14 @@ final class MouseInputCoordinator {
         switch event.phase {
         case .down:
             guard pressedControls.insert(event.controlID).inserted else { return }
+            onControlEvent?(event)
             if case let .shortcut(shortcut) = actions[event.controlID, default: .passthrough] {
                 pressedShortcuts[event.controlID] = shortcut
                 emitter.press(shortcut)
             }
         case .up:
             guard pressedControls.remove(event.controlID) != nil else { return }
+            onControlEvent?(event)
             if let shortcut = pressedShortcuts.removeValue(forKey: event.controlID) {
                 emitter.release(shortcut)
             }
