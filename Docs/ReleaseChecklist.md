@@ -1,22 +1,5 @@
 # Release checklist
 
-## One-time GitHub configuration
-
-Create these Actions secrets in **Settings → Secrets and variables → Actions**:
-
-- `APPLE_TEAM_ID`: Apple Developer Team ID.
-- `DEVELOPER_ID_APPLICATION_P12_BASE64`: base64-encoded export of the
-  Developer ID Application certificate and private key.
-- `DEVELOPER_ID_APPLICATION_P12_PASSWORD`: password used for the P12 export.
-- `KEYCHAIN_PASSWORD`: a strong throwaway password used only for the CI
-  keychain.
-- `APPLE_API_KEY_P8_BASE64`: base64-encoded App Store Connect API private key.
-- `APPLE_API_KEY_ID`: App Store Connect API key ID.
-- `APPLE_API_ISSUER_ID`: App Store Connect issuer ID.
-
-Give the workflow read/write repository permission under **Settings → Actions
-→ General → Workflow permissions**. Never commit any of these values.
-
 ## Every release
 
 1. Update `CHANGELOG.md` and remove “Unreleased” from the release date.
