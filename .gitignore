@@ -3,6 +3,7 @@
 .build-tests/
 .build-ci/
 .build-release/
+.build-sparkle-tools/
 
 DerivedData/
 xcuserdata/

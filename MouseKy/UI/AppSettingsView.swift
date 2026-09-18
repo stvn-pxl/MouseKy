@@ -3,6 +3,7 @@ import SwiftUI
 struct AppSettingsView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var permissions: PermissionManager
+    @EnvironmentObject private var updates: UpdateManager
 
     var body: some View {
         Form {
@@ -31,7 +32,8 @@ struct AppSettingsView: View {
 
                 if !permissions.hasRequiredPermissions {
                     ForEach(permissions.missingPermissions) { permission in
-                        Button("Open \(permission.title) Settings") {
+                        Button("Request \(permission.title) Permission") {
+                            permissions.request(permission)
                             permissions.openSettings(for: permission)
                         }
                     }
@@ -44,10 +46,23 @@ struct AppSettingsView: View {
                     }
                 }
             }
+            Section("Updates") {
+                Toggle(
+                    "Automatically check for updates",
+                    isOn: Binding(
+                        get: { updates.automaticallyChecksForUpdates },
+                        set: { updates.automaticallyChecksForUpdates = $0 }
+                    )
+                )
+                Button("Check for Updates…") {
+                    updates.checkForUpdates()
+                }
+                .disabled(!updates.canCheckForUpdates)
+            }
         }
         .formStyle(.grouped)
         .buttonStyle(.bordered)
-        .frame(width: 460, height: 320)
+        .frame(width: 460, height: 410)
         .onAppear {
             permissions.refresh()
             model.loginItem.refresh()

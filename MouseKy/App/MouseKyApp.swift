@@ -93,6 +93,7 @@ struct MouseKyApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AppModel()
     @StateObject private var permissions = PermissionManager()
+    @StateObject private var updates = UpdateManager()
     @StateObject private var presentation = AppPresentationController.shared
 
     var body: some Scene {
@@ -120,6 +121,7 @@ struct MouseKyApp: App {
             AppSettingsView()
                 .environmentObject(model)
                 .environmentObject(permissions)
+                .environmentObject(updates)
         }
 
         MenuBarExtra {

@@ -32,10 +32,21 @@ final class PermissionManager: ObservableObject {
 
     /// Must only be called after an explicit user action.
     func requestPermissions() {
-        _ = AXIsProcessTrustedWithOptions([
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary)
-        _ = CGRequestListenEventAccess()
+        for permission in Permission.allCases {
+            request(permission)
+        }
+    }
+
+    /// Registers the app with TCC and requests one permission after a user action.
+    func request(_ permission: Permission) {
+        switch permission {
+        case .accessibility:
+            _ = AXIsProcessTrustedWithOptions([
+                kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+            ] as CFDictionary)
+        case .inputMonitoring:
+            _ = CGRequestListenEventAccess()
+        }
         refresh()
     }
 

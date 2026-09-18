@@ -194,7 +194,8 @@ private struct PermissionRequiredOverlay: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
-                            Button("Open Settings") {
+                            Button("Request Permission") {
+                                permissions.request(permission)
                                 permissions.openSettings(for: permission)
                             }
                         }
@@ -209,8 +210,12 @@ private struct PermissionRequiredOverlay: View {
             }
             .padding(28)
             .frame(maxWidth: 520)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 20)
+            .buttonStyle(.bordered)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+                    .shadow(radius: 20)
+            }
             .padding(32)
         }
         .accessibilityAddTraits(.isModal)

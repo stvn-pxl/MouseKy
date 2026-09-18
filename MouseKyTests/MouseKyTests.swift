@@ -577,6 +577,39 @@ final class MouseKyTests: XCTestCase {
     }
 
     @MainActor
+    func testUpdateManagerUsesDriverPreferenceAndChecksManually() {
+        let driver = MockUpdateDriver(
+            automaticallyChecksForUpdates: true,
+            canCheckForUpdates: true
+        )
+        let manager = UpdateManager(driver: driver)
+
+        XCTAssertTrue(manager.automaticallyChecksForUpdates)
+        manager.automaticallyChecksForUpdates = false
+        XCTAssertFalse(driver.automaticallyChecksForUpdates)
+
+        manager.checkForUpdates()
+        XCTAssertEqual(driver.checkCount, 1)
+    }
+
+    @MainActor
+    func testUpdateManagerTracksWhetherCheckingIsAvailable() {
+        let driver = MockUpdateDriver(
+            automaticallyChecksForUpdates: true,
+            canCheckForUpdates: false
+        )
+        let manager = UpdateManager(driver: driver)
+
+        manager.checkForUpdates()
+        XCTAssertEqual(driver.checkCount, 0)
+
+        driver.setCanCheckForUpdates(true)
+        XCTAssertTrue(manager.canCheckForUpdates)
+        manager.checkForUpdates()
+        XCTAssertEqual(driver.checkCount, 1)
+    }
+
+    @MainActor
     func testWiredG502WithDifferentProductIDUsesDiscoveredHIDPPBackend() async {
         let feature = HIDPP42Transport.Feature(
             identifier: 0x1B04, index: 7, type: 0, version: 4
@@ -813,6 +846,33 @@ final class MouseKyTests: XCTestCase {
         return (mouse, snapshot)
     }
 
+}
+
+@MainActor
+private final class MockUpdateDriver: UpdateDriving {
+    var automaticallyChecksForUpdates: Bool
+    private(set) var canCheckForUpdates: Bool
+    private(set) var checkCount = 0
+    private var observer: ((Bool) -> Void)?
+
+    init(automaticallyChecksForUpdates: Bool, canCheckForUpdates: Bool) {
+        self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        self.canCheckForUpdates = canCheckForUpdates
+    }
+
+    func checkForUpdates() {
+        checkCount += 1
+    }
+
+    func observeCanCheckForUpdates(_ handler: @escaping (Bool) -> Void) {
+        observer = handler
+        handler(canCheckForUpdates)
+    }
+
+    func setCanCheckForUpdates(_ value: Bool) {
+        canCheckForUpdates = value
+        observer?(value)
+    }
 }
 
 private final class TestConfigurationStore: ConfigurationStoring {
