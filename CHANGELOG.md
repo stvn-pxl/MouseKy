@@ -11,6 +11,8 @@ All notable changes to MouseKy are documented here. The format follows
 - Open-source project governance and contribution documentation.
 - CI validation for builds and tests.
 - Automated signed, notarized Universal DMG releases.
+- Signed Sparkle updates with daily stable-release checks, manual checks, and
+  user-confirmed installation.
 
 ## [1.0.0] - 2026-09-17
 

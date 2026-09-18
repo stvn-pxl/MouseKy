@@ -15,6 +15,8 @@ jobs:
 
     env:
       ARCHIVE_PATH: .build-release/MouseKy.xcarchive
+      SPARKLE_VERSION: 2.10.0
+      SPARKLE_ARCHIVE_SHA256: c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
 
     steps:
       - uses: actions/checkout@v5
@@ -127,14 +129,86 @@ jobs:
             --key-id "$API_KEY_ID" \
             --issuer "$API_ISSUER_ID" \
             --wait
+          xcrun stapler staple "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
+          xcrun stapler validate "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           xcrun stapler staple "$DMG_PATH"
           xcrun stapler validate "$DMG_PATH"
           spctl --assess --type open --context context:primary-signature -vv "$DMG_PATH"
 
-      - name: Create checksum
+      - name: Download verified Sparkle tools
+        run: |
+          SPARKLE_TOOLS_ROOT=".build-release/sparkle-tools"
+          SPARKLE_ARCHIVE="$SPARKLE_TOOLS_ROOT/Sparkle-$SPARKLE_VERSION.tar.xz"
+          mkdir -p "$SPARKLE_TOOLS_ROOT"
+          curl --fail --location --silent --show-error \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" \
+            --output "$SPARKLE_ARCHIVE"
+          echo "$SPARKLE_ARCHIVE_SHA256  $SPARKLE_ARCHIVE" | shasum -a 256 --check
+          tar -xf "$SPARKLE_ARCHIVE" -C "$SPARKLE_TOOLS_ROOT"
+          echo "GENERATE_APPCAST=$SPARKLE_TOOLS_ROOT/bin/generate_appcast" >> "$GITHUB_ENV"
+
+      - name: Create signed Sparkle update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+        run: |
+          APP_PATH="$ARCHIVE_PATH/Products/Applications/MouseKy.app"
+          UPDATE_DIR=".build-release/updates"
+          UPDATE_ZIP="$UPDATE_DIR/MouseKy-$VERSION.zip"
+          RELEASE_NOTES="$UPDATE_DIR/MouseKy-$VERSION.md"
+          DOWNLOAD_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/"
+          mkdir -p "$UPDATE_DIR"
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$UPDATE_ZIP"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" \
+            --jq .body > "$RELEASE_NOTES"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$GENERATE_APPCAST" \
+            --ed-key-file - \
+            --download-url-prefix "$DOWNLOAD_URL" \
+            --link "https://github.com/$GITHUB_REPOSITORY" \
+            --embed-release-notes \
+            --maximum-deltas 0 \
+            "$UPDATE_DIR"
+
+          {
+            echo "UPDATE_ZIP=$UPDATE_ZIP"
+            echo "APPCAST_PATH=$UPDATE_DIR/appcast.xml"
+            echo "RELEASE_NOTES=$RELEASE_NOTES"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate Sparkle appcast
+        run: |
+          python3 - "$APPCAST_PATH" "$VERSION" "${{ github.run_number }}" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$(basename "$UPDATE_ZIP")" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          appcast_path, version, build, expected_url = sys.argv[1:]
+          sparkle = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+          item = ET.parse(appcast_path).find("./channel/item")
+          if item is None:
+              raise SystemExit("Sparkle appcast has no item")
+          enclosure = item.find("enclosure")
+          if enclosure is None:
+              raise SystemExit("Sparkle appcast has no enclosure")
+          if enclosure.get("url") != expected_url:
+              raise SystemExit(f"Unexpected download URL: {enclosure.get('url')!r}")
+          if item.findtext(f"{{{sparkle}}}shortVersionString") != version:
+              raise SystemExit("Unexpected Sparkle release version")
+          if item.findtext(f"{{{sparkle}}}version") != build:
+              raise SystemExit("Unexpected Sparkle build number")
+          if not enclosure.get(f"{{{sparkle}}}edSignature"):
+              raise SystemExit("Sparkle appcast has no EdDSA signature")
+          PY
+
+      - name: Create checksums
         run: |
           cd .build-release
           shasum -a 256 "MouseKy-$VERSION.dmg" > "MouseKy-$VERSION.dmg.sha256"
+          shasum -a 256 "updates/MouseKy-$VERSION.zip" > "MouseKy-$VERSION.zip.sha256"
 
       - name: Publish GitHub release
         env:
@@ -143,8 +217,11 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "$DMG_PATH" \
             ".build-release/MouseKy-$VERSION.dmg.sha256" \
+            "$UPDATE_ZIP" \
+            ".build-release/MouseKy-$VERSION.zip.sha256" \
+            "$APPCAST_PATH" \
             --title "MouseKy $VERSION" \
-            --generate-notes \
+            --notes-file "$RELEASE_NOTES" \
             --verify-tag
 
       - name: Remove temporary credentials

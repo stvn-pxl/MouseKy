@@ -34,3 +34,14 @@ jobs:
             -derivedDataPath .build-ci \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGN_STYLE=Manual
+
+      - name: Build release configuration
+        run: |
+          xcodebuild build \
+            -project MouseKy.xcodeproj \
+            -scheme MouseKy \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build-ci \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual

@@ -20,6 +20,10 @@ Download the latest signed and notarized DMG from
 
 MouseKy has no Dock icon. Use the mouse icon in the menu bar. Releases are
 universal binaries for Apple silicon and Intel Macs that support macOS 15.
+MouseKy checks the stable GitHub release feed at most once per day by default.
+The check can be disabled, or started manually, in **Settings → Updates**.
+Updates are signed and always require confirmation before installation and
+restart; individual versions can be skipped.
 
 ## Build from source
 
@@ -120,8 +124,10 @@ xcodebuild test \
 
 MouseKy processes mouse events, application changes, and shortcuts locally. It
 does not include analytics, advertising, accounts, or network telemetry.
-Configuration is stored on the Mac. The requested Accessibility and Input
-Monitoring permissions are required for remapping behavior.
+Configuration is stored on the Mac. The only routine network request is the
+optional update check against the public GitHub release feed. The requested
+Accessibility and Input Monitoring permissions are required for remapping
+behavior.
 
 Report vulnerabilities privately as described in
 [`SECURITY.md`](SECURITY.md), especially issues involving event capture or
