@@ -39,12 +39,21 @@ Run these commands from the repository root:
 make build
 make run
 make reinstall
+make clean
+make uninstall
 ```
 
-- `make build` builds `MouseKy.app` in `.build/Build/Products/Debug/`.
-- `make run` builds, quits an already running MouseKy process, then launches the build artifact.
-- `make reinstall` builds, quits MouseKy, replaces `~/Applications/MouseKy.app`, and launches that installed copy. It uses `~/Applications`, so it does not need an administrator password.
-- `make uninstall` quits MouseKy, removes its installed copy, configuration, caches, logs, saved state, preferences, and its Accessibility/Input-Monitoring grants. Source files and `.build` remain untouched.
+- `make build` builds the development app `MouseKy Dev.app` in `.build/Build/Products/Debug/`.
+- `make run` builds, quits an already running MouseKy Dev process, then launches the development build artifact.
+- `make reinstall` builds, quits MouseKy Dev, replaces `~/Applications/MouseKy Dev.app`, and launches that installed copy. It uses `~/Applications`, so it does not need an administrator password.
+- `make clean` removes Xcode build products from `.build`.
+- `make uninstall` quits MouseKy Dev and removes only its installed copy, configuration, caches, logs, saved state, preferences, and Accessibility/Input-Monitoring grants. It also removes all MouseKy build artifacts (project-local `.build*`/`DerivedData` plus Xcode’s `~/Library/Developer/Xcode/DerivedData/MouseKy-*`). The release app, source files, and Derived Data from other projects remain untouched.
+
+Development builds use the app name `MouseKy Dev`, bundle identifier
+`io.github.stvn-pxl.MouseKy.Dev`, and a separate configuration directory.
+They can therefore be installed beside the signed GitHub release, which remains
+`MouseKy` with bundle identifier `io.github.stvn-pxl.MouseKy`. Avoid running
+both at the same time because they access the same mouse hardware.
 
 ## Using the app
 

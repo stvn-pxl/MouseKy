@@ -137,6 +137,8 @@ final class AppModel: ObservableObject {
     var recordingControlID: MouseControlID?
 
     func startEventTap() -> Bool { eventTap.start() }
+    func stopEventTap() { eventTap.stop() }
+
     func refreshMice() {
         hidDevices.refresh()
         synchronizeInputs()

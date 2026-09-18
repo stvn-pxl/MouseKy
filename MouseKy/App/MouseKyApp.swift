@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MouseKyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AppModel()
     @StateObject private var permissions = PermissionManager()
     @StateObject private var presentation = AppPresentationController.shared
@@ -107,6 +108,13 @@ struct MouseKyApp: App {
         .defaultSize(width: 920, height: 640)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
+        .onChange(of: scenePhase) {
+            guard scenePhase == .active else { return }
+            permissions.refresh()
+            if permissions.hasRequiredPermissions {
+                _ = model.startEventTap()
+            }
+        }
 
         Settings {
             AppSettingsView()

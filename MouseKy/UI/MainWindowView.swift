@@ -27,13 +27,25 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 310)
-        } detail: {
-            detail
+        ZStack {
+            NavigationSplitView {
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 310)
+            } detail: {
+                detail
+            }
+
+            if !permissions.hasRequiredPermissions {
+                PermissionRequiredOverlay()
+            }
         }
         .navigationTitle("MouseKy")
+        .task {
+            while !Task.isCancelled {
+                updatePermissionState()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
         .sheet(item: $profileSheet) { sheet in
             switch sheet {
             case .create:
@@ -138,6 +150,76 @@ struct MainWindowView: View {
                 Text("Connect a mouse and select it in the sidebar.")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func updatePermissionState() {
+        permissions.refresh()
+        if permissions.hasRequiredPermissions {
+            _ = model.startEventTap()
+        } else {
+            model.stopEventTap()
+        }
+    }
+}
+
+private struct PermissionRequiredOverlay: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var permissions: PermissionManager
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 20) {
+                Label("MouseKy needs permission", systemImage: "lock.trianglebadge.exclamationmark")
+                    .font(.title2.bold())
+
+                Text("Grant the missing permissions in System Settings before MouseKy can detect mouse buttons and trigger shortcuts.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(permissions.missingPermissions) { permission in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(permission.title)
+                                    .fontWeight(.semibold)
+                                Text(permission.description)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Open Settings") {
+                                permissions.openSettings(for: permission)
+                            }
+                        }
+                    }
+                }
+
+                HStack {
+                    Button("Check Again") {
+                        checkPermissions()
+                    }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 520)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 20)
+            .padding(32)
+        }
+        .accessibilityAddTraits(.isModal)
+    }
+
+    private func checkPermissions() {
+        permissions.refresh()
+        if permissions.hasRequiredPermissions {
+            _ = model.startEventTap()
         }
     }
 }

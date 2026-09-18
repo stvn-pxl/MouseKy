@@ -13,8 +13,16 @@ final class ConfigurationStore: ConfigurationStoring {
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
         let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MouseKy", isDirectory: true)
+            .appendingPathComponent(Self.applicationSupportDirectoryName, isDirectory: true)
         fileURL = directory.appendingPathComponent("config.json")
+    }
+
+    private static var applicationSupportDirectoryName: String {
+        guard let bundleName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String,
+              !bundleName.isEmpty else {
+            return "MouseKy"
+        }
+        return bundleName
     }
 
     func load() -> AppConfiguration {
