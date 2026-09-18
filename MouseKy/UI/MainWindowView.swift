@@ -210,6 +210,7 @@ private struct PermissionRequiredOverlay: View {
             }
             .padding(28)
             .frame(maxWidth: 520)
+            .buttonStyle(.bordered)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
             .shadow(radius: 20)
             .padding(32)
