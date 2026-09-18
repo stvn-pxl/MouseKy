@@ -3,36 +3,33 @@
 [![CI](https://github.com/stvn-pxl/MouseKy/actions/workflows/ci.yml/badge.svg)](https://github.com/stvn-pxl/MouseKy/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-MouseKy is a native macOS 15+ menu-bar app for per-device, app-specific mouse
-profiles. `IOHIDManager` discovers connected pointing devices; runtime
-remapping currently requires a compatible Logitech HID++ device. MouseKy uses
-`CGEventTap` only for recording keyboard shortcuts.
+MouseKy is a macOS menu-bar app that lets you give extra mouse buttons
+different keyboard shortcuts for different apps. For example, the same button
+can copy text in one app and switch tabs in another.
 
 ## Download
 
-Download the latest signed and notarized DMG from
+Download the latest version from
 [GitHub Releases](https://github.com/stvn-pxl/MouseKy/releases/latest).
 
-1. Open the DMG.
-2. Drag MouseKy into the **Applications** folder.
-3. Launch MouseKy from Applications.
-4. Use MouseKy's permission overlay to request **Accessibility** (for emitting
-   shortcuts) and **Input Monitoring** (for detecting input), then return to
-   MouseKy and choose **Check Again**. Restart only if macOS still denies the
-   HID interface.
+1. Open the downloaded `MouseKy-1.0.0.dmg` file.
+2. Drag **MouseKy** onto the **Applications** folder shown in the window.
+3. Open the **Applications** folder and start MouseKy.
+4. MouseKy will explain which permissions it needs. Click **Request
+   Permission** beside each missing permission and follow the macOS prompts.
+5. Return to MouseKy and click **Check Again**.
 
-MouseKy normally runs from the mouse icon in the menu bar. A Dock icon appears
-while the main window is open. Releases are universal binaries for Apple
-silicon and Intel Macs that support macOS 15.
-MouseKy checks the stable GitHub release feed at most once per day by default.
-The check can be disabled, or started manually, in **Settings → Updates**.
-Updates are signed and always require confirmation before installation and
-restart; individual versions can be skipped.
+After setup, MouseKy runs from the small mouse icon at the top of the screen.
+Its Dock icon only appears while the main window is open.
 
-On first launch, MouseKy enables **Open MouseKy at Login**. This can be disabled
-under **Settings → Startup**.
+MouseKy checks for updates about once per day. It never installs an update
+without asking first. Update checks can be changed under **Settings →
+Updates**.
 
-## Build from source
+MouseKy starts automatically when you log in. Turn this off under **Settings →
+Startup** if you do not want that.
+
+## Build from source (for developers)
 
 1. Install the full Xcode app, select it with `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`, then open `MouseKy.xcodeproj`.
 2. Select the `MouseKy` scheme and run it locally. Use the menu-bar mouse icon
@@ -70,21 +67,37 @@ They can therefore be installed beside the signed GitHub release, which remains
 both at the same time because they access the same mouse hardware.
 Development builds do not start the automatic updater.
 
-## Using the app
+## Using MouseKy
 
-1. Select a detected mouse in the sidebar. Use **Scan Mice** after connecting
-   or disconnecting hardware if the list has not refreshed.
-2. Compatible Logitech HID++ controls appear automatically. Use **Scan
-   Buttons** only when MouseKy offers it as a fallback diagnostic.
-3. Choose or create a profile, click **Record Shortcut** beside an extra
-   control, and press the desired keyboard combination.
-4. Assign running apps or application bundles to profiles as needed.
+### Assign a shortcut to a mouse button
 
-Left and right click are hidden from the mapping list and cannot be remapped.
-Each configured device has exactly one default profile for macOS and apps
-without an explicit assignment. All configured, connected compatible Logitech
-mice can run their own effective profile simultaneously; sidebar selection only
-chooses which device is being edited.
+1. Connect your mouse and open MouseKy from the mouse icon at the top of the
+   screen.
+2. Choose your mouse from the list on the left. If it is missing, click **Scan
+   Mice**.
+3. Choose the profile you want to edit. The **Default** profile is used
+   everywhere unless you create a profile for a specific app.
+4. Find the extra mouse button you want to change and click **Record
+   Shortcut**.
+5. Press the keyboard shortcut you want that mouse button to perform.
+6. Test the button. MouseKy saves changes automatically.
+
+If MouseKy shows **Scan Buttons**, click it and press each extra mouse button
+once so MouseKy can find it.
+
+The normal left and right mouse buttons are protected and cannot be changed.
+
+### Use different shortcuts in different apps
+
+1. Create a new profile or choose an existing one.
+2. In the apps area, click **Add**.
+3. Choose an app that is currently open, click **Add More Apps…** to choose
+   one from your Mac, or choose **Use Globally** to make this the default
+   profile.
+4. Set the mouse-button shortcuts for that profile.
+
+MouseKy changes profiles automatically when you switch apps. Every connected,
+compatible mouse can have its own profiles.
 
 ## Logitech HID++ support
 
@@ -105,7 +118,7 @@ chooses which device is being edited.
   commits the unchanged directory sector last, and attempts to restore the
   original snapshot if verification fails.
 
-## Manual verification
+## Manual testing checklist (for contributors)
 
 - Connect/disconnect a mouse and run **Scan Mice** again.
 - When the fallback scanner is offered, scan each physical button and ensure
