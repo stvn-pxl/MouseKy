@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - name: Build and test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project MouseKy.xcodeproj \
+            -scheme MouseKy \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build-ci \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual
+
+      - name: Build release configuration
+        run: |
+          xcodebuild build \
+            -project MouseKy.xcodeproj \
+            -scheme MouseKy \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath .build-ci \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual
