@@ -208,7 +208,7 @@ jobs:
         run: |
           cd .build-release
           shasum -a 256 "MouseKy-$VERSION.dmg" > "MouseKy-$VERSION.dmg.sha256"
-          shasum -a 256 "updates/MouseKy-$VERSION.zip" > "MouseKy-$VERSION.zip.sha256"
+          (cd updates && shasum -a 256 "MouseKy-$VERSION.zip") > "MouseKy-$VERSION.zip.sha256"
 
       - name: Publish GitHub release
         env:
