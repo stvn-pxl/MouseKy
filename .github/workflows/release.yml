@@ -95,16 +95,42 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
 
+      - name: Export Developer ID app
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          EXPORT_OPTIONS=".build-release/ExportOptions.plist"
+          EXPORT_PATH=".build-release/export"
+          cat > "$EXPORT_OPTIONS" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>developer-id</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Developer ID Application</string>
+            <key>teamID</key>
+            <string>$APPLE_TEAM_ID</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportPath "$EXPORT_PATH" \
+            -exportOptionsPlist "$EXPORT_OPTIONS"
+          echo "APP_PATH=$EXPORT_PATH/MouseKy.app" >> "$GITHUB_ENV"
+
       - name: Verify app signature
         run: |
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           lipo -archs "$APP_PATH/Contents/MacOS/MouseKy" | grep -q arm64
           lipo -archs "$APP_PATH/Contents/MacOS/MouseKy" | grep -q x86_64
 
       - name: Create signed DMG
         run: |
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           DMG_ROOT=".build-release/dmg"
           DMG_PATH=".build-release/MouseKy-$VERSION.dmg"
           mkdir -p "$DMG_ROOT"
@@ -147,8 +173,8 @@ jobs:
             exit 1
           fi
 
-          xcrun stapler staple "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
-          xcrun stapler validate "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
           xcrun stapler staple "$DMG_PATH"
           xcrun stapler validate "$DMG_PATH"
           spctl --assess --type open --context context:primary-signature -vv "$DMG_PATH"
@@ -170,7 +196,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
         run: |
-          APP_PATH="$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           UPDATE_DIR=".build-release/updates"
           UPDATE_ZIP="$UPDATE_DIR/MouseKy-$VERSION.zip"
           RELEASE_NOTES="$UPDATE_DIR/MouseKy-$VERSION.md"
