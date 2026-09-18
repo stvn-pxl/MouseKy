@@ -194,7 +194,8 @@ private struct PermissionRequiredOverlay: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
-                            Button("Open Settings") {
+                            Button("Request Permission") {
+                                permissions.request(permission)
                                 permissions.openSettings(for: permission)
                             }
                         }

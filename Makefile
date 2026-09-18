@@ -3,6 +3,8 @@ SCHEME := MouseKy
 CONFIGURATION := Debug
 DEV_APP_NAME := MouseKy Dev
 DEV_BUNDLE_ID := io.github.stvn-pxl.MouseKy.Dev
+DEV_SIGNING_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/Apple Development/ { print $$2; exit }')
+DEV_CODE_SIGN_IDENTITY := $(if $(DEV_SIGNING_IDENTITY),$(DEV_SIGNING_IDENTITY),-)
 DERIVED_DATA := .build
 BUILD_ARTIFACTS := $(DERIVED_DATA) .build-current .build-tests .build-ci .build-release DerivedData
 XCODE_DERIVED_DATA_ROOT := $(HOME)/Library/Developer/Xcode/DerivedData
@@ -15,7 +17,7 @@ LOG_DIR := $(HOME)/Library/Logs/$(DEV_APP_NAME)
 SAVED_STATE := $(HOME)/Library/Saved Application State/$(DEV_BUNDLE_ID).savedState
 PREFERENCES := $(HOME)/Library/Preferences/$(DEV_BUNDLE_ID).plist
 LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-DEV_BUILD_SETTINGS := PRODUCT_NAME="$(DEV_APP_NAME)" PRODUCT_BUNDLE_IDENTIFIER="$(DEV_BUNDLE_ID)"
+DEV_BUILD_SETTINGS := PRODUCT_NAME="$(DEV_APP_NAME)" PRODUCT_BUNDLE_IDENTIFIER="$(DEV_BUNDLE_ID)" CODE_SIGN_IDENTITY="$(DEV_CODE_SIGN_IDENTITY)" CODE_SIGN_STYLE=Manual
 
 .PHONY: build reinstall run clean uninstall
 

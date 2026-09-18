@@ -32,7 +32,8 @@ struct AppSettingsView: View {
 
                 if !permissions.hasRequiredPermissions {
                     ForEach(permissions.missingPermissions) { permission in
-                        Button("Open \(permission.title) Settings") {
+                        Button("Request \(permission.title) Permission") {
+                            permissions.request(permission)
                             permissions.openSettings(for: permission)
                         }
                     }
