@@ -124,11 +124,32 @@ jobs:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
-          xcrun notarytool submit "$DMG_PATH" \
-            --key "$API_KEY_PATH" \
-            --key-id "$API_KEY_ID" \
-            --issuer "$API_ISSUER_ID" \
-            --wait
+          NOTARIZATION_RESULT=".build-release/notarization.json"
+          if ! xcrun notarytool submit "$DMG_PATH" \
+              --key "$API_KEY_PATH" \
+              --key-id "$API_KEY_ID" \
+              --issuer "$API_ISSUER_ID" \
+              --wait \
+              --output-format json > "$NOTARIZATION_RESULT"; then
+            cat "$NOTARIZATION_RESULT"
+            exit 1
+          fi
+          cat "$NOTARIZATION_RESULT"
+
+          SUBMISSION_ID="$(python3 -c \
+            'import json,sys; print(json.load(open(sys.argv[1]))["id"])' \
+            "$NOTARIZATION_RESULT")"
+          NOTARIZATION_STATUS="$(python3 -c \
+            'import json,sys; print(json.load(open(sys.argv[1]))["status"])' \
+            "$NOTARIZATION_RESULT")"
+          if [[ "$NOTARIZATION_STATUS" != "Accepted" ]]; then
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --key "$API_KEY_PATH" \
+              --key-id "$API_KEY_ID" \
+              --issuer "$API_ISSUER_ID"
+            exit 1
+          fi
+
           xcrun stapler staple "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           xcrun stapler validate "$ARCHIVE_PATH/Products/Applications/MouseKy.app"
           xcrun stapler staple "$DMG_PATH"
