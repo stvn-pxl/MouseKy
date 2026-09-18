@@ -125,15 +125,12 @@ jobs:
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           NOTARIZATION_RESULT=".build-release/notarization.json"
-          if ! xcrun notarytool submit "$DMG_PATH" \
+          xcrun notarytool submit "$DMG_PATH" \
               --key "$API_KEY_PATH" \
               --key-id "$API_KEY_ID" \
               --issuer "$API_ISSUER_ID" \
               --wait \
-              --output-format json > "$NOTARIZATION_RESULT"; then
-            cat "$NOTARIZATION_RESULT"
-            exit 1
-          fi
+              --output-format json > "$NOTARIZATION_RESULT" || true
           cat "$NOTARIZATION_RESULT"
 
           SUBMISSION_ID="$(python3 -c \
