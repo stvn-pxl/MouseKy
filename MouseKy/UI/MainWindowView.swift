@@ -198,7 +198,6 @@ private struct PermissionRequiredOverlay: View {
                                 permissions.request(permission)
                                 permissions.openSettings(for: permission)
                             }
-                            .buttonStyle(PermissionActionButtonStyle())
                         }
                     }
                 }
@@ -207,13 +206,16 @@ private struct PermissionRequiredOverlay: View {
                     Button("Check Again") {
                         checkPermissions()
                     }
-                    .buttonStyle(.borderless)
                 }
             }
             .padding(28)
             .frame(maxWidth: 520)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .shadow(radius: 20)
+            .buttonStyle(.bordered)
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.regularMaterial)
+                    .shadow(radius: 20)
+            }
             .padding(32)
         }
         .accessibilityAddTraits(.isModal)
@@ -224,18 +226,6 @@ private struct PermissionRequiredOverlay: View {
         if permissions.hasRequiredPermissions {
             _ = model.startEventTap()
         }
-    }
-}
-
-private struct PermissionActionButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.callout.weight(.medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.tint, in: RoundedRectangle(cornerRadius: 6))
-            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
