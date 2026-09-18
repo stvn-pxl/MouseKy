@@ -6,6 +6,19 @@ struct AppSettingsView: View {
 
     var body: some View {
         Form {
+            Section("Startup") {
+                Toggle(
+                    "Open MouseKy at Login",
+                    isOn: Binding(
+                        get: { model.loginItem.isEnabled },
+                        set: { model.loginItem.setEnabled($0) }
+                    )
+                )
+                if let error = model.loginItem.errorMessage {
+                    Text(error)
+                        .foregroundStyle(.red)
+                }
+            }
             Section("Input Permissions") {
                 Label(
                     "Accessibility: \(permissions.accessibilityGranted ? "Granted" : "Missing")",
@@ -30,24 +43,6 @@ struct AppSettingsView: View {
                         _ = model.startEventTap()
                     }
                 }
-            }
-            Section("Startup") {
-                Toggle(
-                    "Open MouseKy at Login",
-                    isOn: Binding(
-                        get: { model.loginItem.isEnabled },
-                        set: { model.loginItem.setEnabled($0) }
-                    )
-                )
-                if let error = model.loginItem.errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
-            }
-            Section("Logitech HID++") {
-                LabeledContent("Runtime Backend", value: model.backendStatus.displayText)
-                Text("G HUB or Options+ must be closed if it uses the same HID++ interface exclusively.")
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
