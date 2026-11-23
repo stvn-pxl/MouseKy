@@ -11,3 +11,8 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      # init and analyze must always run the same CodeQL version.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
