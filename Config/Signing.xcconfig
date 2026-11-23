@@ -1,0 +1,12 @@
+// Signing for Debug builds of the MouseKy app target.
+//
+// Defaults to ad hoc signing so the project builds for everyone. To keep macOS
+// permissions across rebuilds, copy Signing.local.xcconfig.example to
+// Signing.local.xcconfig and set your own team there. That file is ignored by
+// git, so personal team IDs never end up in the repository.
+// Release signing is configured by the release workflow, not here.
+
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+
+#include? "Signing.local.xcconfig"

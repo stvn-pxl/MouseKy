@@ -24,3 +24,5 @@ xcuserdata/
 *.key
 *.pem
 *.mobileprovision
+# Personal signing settings
+Config/Signing.local.xcconfig
