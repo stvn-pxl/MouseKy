@@ -50,10 +50,15 @@ final class HIDDeviceManager: ObservableObject {
         let isMouse = HIDDeviceClassifier.mouseFlags(for: interfaces)
         knownDevices = [:]
         deviceReferences = [:]
-        for (index, device) in devices.enumerated() where isMouse[index] {
+        // Several interfaces of one mouse can qualify and share its id. Visit the
+        // pointing interface first so button discovery always reads the same one.
+        for index in HIDDeviceClassifier.preferenceOrder(of: interfaces) where isMouse[index] {
+            let device = devices[index]
             guard let mouse = makeMouse(from: device) else { continue }
             knownDevices[ObjectIdentifier(device)] = mouse
-            deviceReferences[mouse.id] = device
+            if deviceReferences[mouse.id] == nil {
+                deviceReferences[mouse.id] = device
+            }
         }
         declaredButtonNumbersByMouseID = declaredButtonNumbersByMouseID.filter { deviceReferences[$0.key] != nil }
         publish()
@@ -137,8 +142,16 @@ final class HIDDeviceManager: ObservableObject {
                 page: integer(kIOHIDPrimaryUsagePageKey) ?? 0,
                 usage: integer(kIOHIDPrimaryUsageKey) ?? 0
             ),
-            usagePairs: pairs
+            usagePairs: pairs,
+            declaresKeyboardKeys: declaresKeyboardKeys(device)
         )
+    }
+
+    private static func declaresKeyboardKeys(_ device: IOHIDDevice) -> Bool {
+        guard let elements = IOHIDDeviceCopyMatchingElements(
+            device, nil, IOOptionBits(kIOHIDOptionsTypeNone)
+        ) as? [IOHIDElement] else { return false }
+        return elements.contains { IOHIDElementGetUsagePage($0) == kHIDPage_KeyboardOrKeypad }
     }
 
     /// USB HID devices sit below their IOUSBHostInterface, which carries the interface
@@ -248,6 +261,8 @@ struct HIDInterfaceInfo: Equatable {
     var interfaceNumber: Int?
     var primaryUsage: HIDUsage
     var usagePairs: [HIDUsage]
+    /// Whether the interface itself reports keyboard keys (usage page 0x07).
+    var declaresKeyboardKeys = false
 
     var usages: Set<HIDUsage> { Set(usagePairs).union([primaryUsage]) }
 }
@@ -259,8 +274,9 @@ struct HIDInterfaceInfo: Equatable {
 /// Bluetooth mice) carry Keyboard collections so buttons can send keystrokes.
 /// Neither the presence of a Mouse nor of a Keyboard collection decides it, so a
 /// physical device is classified by its lead interface: the lowest USB interface
-/// number, or for single-interface devices the primary usage. Keyboards put their
-/// keyboard first. Logitech receivers also put a keyboard first, so Logitech
+/// number. Keyboards put their keyboard first. Without interface numbers
+/// (Bluetooth, or when the registry lookup fails) any keyboard in the device, or
+/// keyboard keys on the interface itself, rule it out. Logitech receivers also put a keyboard first, so Logitech
 /// devices with a HID++ interface are always treated as mouse-capable.
 enum HIDDeviceClassifier {
     static let logitechVendorID = 0x046D
@@ -290,7 +306,24 @@ enum HIDDeviceClassifier {
     static func isMouse(_ interface: HIDInterfaceInfo, family: [HIDInterfaceInfo]) -> Bool {
         guard interface.usages.contains(.mouse) else { return false }
         if isLogitechHIDPP(family) { return true }
-        return !isKeyboard(lead(of: family) ?? interface)
+        if let lead = lead(of: family) { return !isKeyboard(lead) }
+        return !family.contains(where: isKeyboard) && !interface.declaresKeyboardKeys
+    }
+
+    /// Interface indices ordered so the main pointing interface of a device comes
+    /// first: primary usage Mouse, then the lowest USB interface number, then
+    /// interfaces without keyboard keys. Ties keep a stable vendor/product order.
+    static func preferenceOrder(of interfaces: [HIDInterfaceInfo]) -> [Int] {
+        interfaces.indices.sorted { lhs, rhs in
+            let a = interfaces[lhs], b = interfaces[rhs]
+            let aPrimary = a.primaryUsage == .mouse, bPrimary = b.primaryUsage == .mouse
+            if aPrimary != bPrimary { return aPrimary }
+            let aNumber = a.interfaceNumber ?? Int.max, bNumber = b.interfaceNumber ?? Int.max
+            if aNumber != bNumber { return aNumber < bNumber }
+            if a.declaresKeyboardKeys != b.declaresKeyboardKeys { return !a.declaresKeyboardKeys }
+            return (a.vendorID, a.productID, a.locationID ?? 0, a.usagePairs.count, lhs)
+                < (b.vendorID, b.productID, b.locationID ?? 0, b.usagePairs.count, rhs)
+        }
     }
 
     private static func lead(of family: [HIDInterfaceInfo]) -> HIDInterfaceInfo? {

@@ -1064,6 +1064,31 @@ final class HIDDeviceClassifierTests: XCTestCase {
         XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [mouse]), [true])
     }
 
+    func testBluetoothKeyboardWithSeparateMouseKeysServiceIsNotAMouse() {
+        // No interface numbers: the keyboard service rules out the mouse-keys service.
+        let keyboard = [
+            interface(0x3434, 0x0252, primary: .keyboard),
+            interface(0x3434, 0x0252, primary: .mouse, pairs: [.mouse, consumer])
+        ]
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: keyboard), [false, false])
+    }
+
+    func testInterfaceWithKeyboardKeysIsNotAMouseWithoutLocation() {
+        var mouseKeys = interface(0x3434, 0x0253, primary: .mouse)
+        mouseKeys.locationID = nil
+        mouseKeys.declaresKeyboardKeys = true
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [mouseKeys]), [false])
+    }
+
+    func testPointingInterfaceIsPreferredForButtons() {
+        var macro = interface(0x1532, 0x0001, number: 2, primary: .mouse, pairs: [.mouse, .keyboard])
+        macro.declaresKeyboardKeys = true
+        let secondary = interface(0x1532, 0x0001, number: 1, primary: .keyboard, pairs: [.keyboard, .mouse])
+        let pointer = interface(0x1532, 0x0001, number: 0, primary: .mouse)
+        XCTAssertEqual(HIDDeviceClassifier.preferenceOrder(of: [macro, secondary, pointer]).first, 2)
+        XCTAssertEqual(HIDDeviceClassifier.preferenceOrder(of: [pointer, secondary, macro]).first, 0)
+    }
+
     func testInterfacesAtDifferentLocationsAreSeparateDevices() {
         let keyboard = interface(0x3434, 0x0251, location: 1, number: 0, primary: .keyboard)
         let otherMouse = interface(0x3434, 0x0251, location: 2, number: 2, primary: .mouse)
