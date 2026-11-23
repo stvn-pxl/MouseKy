@@ -12,7 +12,7 @@ can copy text in one app and switch tabs in another.
 Download the latest version from
 [GitHub Releases](https://github.com/stvn-pxl/MouseKy/releases/latest).
 
-1. Open the downloaded `MouseKy-1.0.0.dmg` file.
+1. Open the downloaded `MouseKy-1.0.1.dmg` file.
 2. Drag **MouseKy** onto the **Applications** folder shown in the window.
 3. Open the **Applications** folder and start MouseKy.
 4. MouseKy will explain which permissions it needs. Click **Request

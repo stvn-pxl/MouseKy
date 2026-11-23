@@ -6,13 +6,10 @@ All notable changes to MouseKy are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-23
+
 ### Added
 
-- Open-source project governance and contribution documentation.
-- CI validation for builds and tests.
-- Automated signed, notarized Universal DMG releases.
-- Signed Sparkle updates with daily stable-release checks, manual checks, and
-  user-confirmed installation.
 - Logitech G309 support over Bluetooth LE, including button names.
 - Each button row shows the button's built-in function.
 
@@ -24,6 +21,10 @@ All notable changes to MouseKy are documented here. The format follows
 - HID++ works with devices that only expose the long report.
 - Development builds no longer check for updates.
 
+### Changed
+
+- Sparkle updated to 2.10.1.
+
 ## [1.0.0] - 2026-09-17
 
 ### Added
@@ -32,6 +33,12 @@ All notable changes to MouseKy are documented here. The format follows
 - Generic mouse discovery and button scanning.
 - Logitech HID++ runtime control with state restoration.
 - Guarded G502 C08D onboard-memory inspection and assignment changes.
+- Open-source project governance and contribution documentation.
+- CI validation for builds and tests.
+- Automated signed, notarized Universal DMG releases.
+- Signed Sparkle updates with daily stable-release checks, manual checks, and
+  user-confirmed installation.
 
-[Unreleased]: https://github.com/stvn-pxl/MouseKy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/stvn-pxl/MouseKy/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/stvn-pxl/MouseKy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/stvn-pxl/MouseKy/releases/tag/v1.0.0
