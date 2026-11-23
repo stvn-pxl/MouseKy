@@ -69,6 +69,7 @@
 		B00000000000000000000027 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseInputCoordinator.swift; sourceTree = "<group>"; };
 		B00000000000000000000028 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechControlNames.swift; sourceTree = "<group>"; };
 		B00000000000000000000029 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateManager.swift; sourceTree = "<group>"; };
+		B00000000000000000000099 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,7 +84,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		C00000000000000000000001 = {isa = PBXGroup; children = (C00000000000000000000002,C00000000000000000000010, B00000000000000000000015,B00000000000000000000019); sourceTree = "<group>"; };
+		C00000000000000000000001 = {isa = PBXGroup; children = (C00000000000000000000002,C00000000000000000000010, B00000000000000000000015,B00000000000000000000019,B00000000000000000000099); sourceTree = "<group>"; };
 		C00000000000000000000002 = {isa = PBXGroup; path = MouseKy; sourceTree = "<group>"; children = (C00000000000000000000003,C00000000000000000000004,C00000000000000000000005,C00000000000000000000006,C00000000000000000000008,C00000000000000000000009,B00000000000000000000014); };
 		C00000000000000000000003 = {isa = PBXGroup; path = App; sourceTree = "<group>"; children = (B00000000000000000000001,B00000000000000000000002); };
 		C00000000000000000000004 = {isa = PBXGroup; path = Core; sourceTree = "<group>"; children = (B00000000000000000000003,B00000000000000000000004,B00000000000000000000005,B00000000000000000000006,B00000000000000000000027); };
@@ -116,7 +117,7 @@
 /* Begin XCBuildConfiguration section */
 		E00000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; }; name = Debug; };
 		E00000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; }; name = Release; };
-		E00000000000000000000004 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = MouseKy/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 1.0.0; PRODUCT_BUNDLE_IDENTIFIER = "io.github.stvn-pxl.MouseKy"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_VERSION = 5.9; }; name = Debug; };
+		E00000000000000000000004 = {isa = XCBuildConfiguration; baseConfigurationReference = B00000000000000000000099 /* Signing.xcconfig */; buildSettings = { CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = MouseKy/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 1.0.0; PRODUCT_BUNDLE_IDENTIFIER = "io.github.stvn-pxl.MouseKy"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_VERSION = 5.9; }; name = Debug; };
 		E00000000000000000000005 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = MouseKy/Info.plist; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 1.0.0; PRODUCT_BUNDLE_IDENTIFIER = "io.github.stvn-pxl.MouseKy"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_VERSION = 5.9; }; name = Release; };
 		E00000000000000000000006 = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = "io.github.stvn-pxl.MouseKyTests"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_VERSION = 5.9; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MouseKy.app/Contents/MacOS/MouseKy"; }; name = Debug; };
 		E00000000000000000000007 = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGN_IDENTITY = "-"; CODE_SIGN_STYLE = Manual; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; PRODUCT_BUNDLE_IDENTIFIER = "io.github.stvn-pxl.MouseKyTests"; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_VERSION = 5.9; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MouseKy.app/Contents/MacOS/MouseKy"; }; name = Release; };

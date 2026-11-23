@@ -1,0 +1,6 @@
+// Copy to Signing.local.xcconfig (ignored by git) and set your team ID,
+// shown in Xcode under Settings → Accounts.
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM = YOUR_TEAM_ID

@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let backendLogger = Logger(subsystem: "io.github.stvn-pxl.MouseKy", category: "HIDPP")
 
 @MainActor
 protocol LogitechInputBackend: AnyObject {
@@ -64,17 +67,17 @@ final class MouseButtonSpy8110Backend: LogitechInputBackend {
             throw LogitechInputBackendError.malformedResponse
         }
         originalTable = Data(mappingResponse.parameters.prefix(16))
+        backendLogger.info("0x8110 product=0x\(String(format: "%04X", self.productID), privacy: .public) count=\(count, privacy: .public) table=\(self.originalTable.map { String(format: "%02X", $0) }.joined(separator: " "), privacy: .public)")
         while originalTable.count < 16 { originalTable.append(0) }
         controls = (0 ..< count).map { index in
-            MouseControl(
+            let name = LogitechControlNames.buttonSpyName(productID: productID, index: index)
+            return MouseControl(
                 id: .logitechButton(index),
-                name: LogitechControlNames.buttonSpyName(
-                    productID: productID,
-                    index: index
-                ),
+                name: name,
                 source: kind.rawValue,
                 isPrimary: index == 0 || index == 1,
-                isControllable: index > 1
+                isControllable: index > 1,
+                defaultFunction: LogitechControlNames.defaultFunction(forControlName: name)
             )
         }
         session.setNotificationHandler { [weak self] packet in
@@ -195,19 +198,13 @@ final class ReprogrammableControls1B04Backend: LogitechInputBackend {
             }
             let cid = UInt16(response.parameters[0]) << 8 | UInt16(response.parameters[1])
             let flags = response.parameters[4]
-            let isPrimary = cid == 0x0050 || cid == 0x0051
-            discovered.append(.init(
-                id: .hidppControl(cid),
-                name: LogitechControlNames.hidppName(for: cid),
-                source: kind.rawValue,
-                isPrimary: isPrimary,
-                isControllable: flags & 0x20 != 0 && !isPrimary
-            ))
+            backendLogger.info("0x1B04 control index=\(index, privacy: .public) info=\(response.parameters.prefix(9).map { String(format: "%02X", $0) }.joined(separator: " "), privacy: .public)")
             let state = try await session.call(
                 feature: feature,
                 function: 2,
                 parameters: Data([UInt8(cid >> 8), UInt8(cid & 0xFF)])
             )
+            backendLogger.info("0x1B04 reporting cid=0x\(String(format: "%04X", cid), privacy: .public) state=\(state.parameters.prefix(6).map { String(format: "%02X", $0) }.joined(separator: " "), privacy: .public)")
             if state.parameters.count >= 5 {
                 originalStates[cid] = ReportingState(
                     diverted: state.parameters[2] & 0x01 != 0,
@@ -215,6 +212,21 @@ final class ReprogrammableControls1B04Backend: LogitechInputBackend {
                     remapLow: state.parameters[4]
                 )
             }
+            // A non-zero remap target means the control already performs another
+            // control's function; describe that instead of its own.
+            let remapTarget = originalStates[cid].map { UInt16($0.remapHigh) << 8 | UInt16($0.remapLow) } ?? 0
+            let functionSource = remapTarget == 0 ? cid : remapTarget
+            let isPrimary = cid == 0x0050 || cid == 0x0051
+            discovered.append(.init(
+                id: .hidppControl(cid),
+                name: LogitechControlNames.hidppName(for: cid),
+                source: kind.rawValue,
+                isPrimary: isPrimary,
+                isControllable: flags & 0x20 != 0 && !isPrimary,
+                defaultFunction: LogitechControlNames.defaultFunction(
+                    forControlName: LogitechControlNames.hidppName(for: functionSource)
+                )
+            ))
         }
         controls = discovered
         session.setNotificationHandler { [weak self] packet in

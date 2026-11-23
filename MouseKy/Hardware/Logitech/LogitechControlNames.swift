@@ -15,6 +15,30 @@ enum LogitechControlNames {
         return names[index]
     }
 
+    /// Describes the built-in function behind a control name, e.g. the DPI button.
+    static func defaultFunction(forControlName name: String) -> String? {
+        defaultFunctionsByName[name]
+    }
+
+    private static let defaultFunctionsByName: [String: String] = [
+        "Middle Click": "Middle click",
+        "Back": "Back",
+        "Forward": "Forward",
+        "Wheel Tilt Left": "Scroll left",
+        "Wheel Tilt Right": "Scroll right",
+        "DPI Switch": "Cycle DPI",
+        "DPI Change": "Cycle DPI",
+        "DPI Up": "Increase DPI",
+        "DPI Down": "Decrease DPI",
+        "Horizontal Scroll": "Horizontal scrolling",
+        "SmartShift": "Toggle SmartShift",
+        "Show Desktop": "Show desktop",
+        "Lock Screen": "Lock screen",
+        "App Switch": "Switch apps",
+        "Profile Select": "Switch onboard profile",
+        "Battery Status": "Show battery status"
+    ]
+
     private static let cidNameGroups: [(name: String, cids: [UInt16])] = [
         ("Left Click", [0x0050]),
         ("Right Click", [0x0051]),
@@ -58,6 +82,10 @@ enum LogitechControlNames {
             "Left Click", "Right Click", "Middle Click", "Back", "Forward",
             "DPI Switch", "DPI Down", "DPI Up", "Wheel Tilt Left",
             "Wheel Tilt Right", "Profile Select"
+        ],
+        // G309 LIGHTSPEED over Bluetooth LE.
+        0xB03C: [
+            "Left Click", "Right Click", "Middle Click", "Back", "Forward", "DPI Switch"
         ],
         0xC08D: [
             "Left Click", "Right Click", "Middle Click", "Back", "Forward",

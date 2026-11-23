@@ -176,11 +176,14 @@ final class HIDPP42Transport: @unchecked Sendable {
         let usagePage: Int
         let maxInputReportSize: Int
         let maxOutputReportSize: Int
+        /// Bluetooth LE Logitech devices expose only the long HID++ report (0x11).
+        var supportsShortReports = true
     }
 
     private let device: IOHIDDevice
     private let manager: IOHIDManager?
     private let deviceIndex: UInt8
+    private let supportsShortReports: Bool
     private let lock = NSLock()
     private var pending: CheckedContinuation<Packet, Error>?
     private var expected: Packet?
@@ -195,10 +198,16 @@ final class HIDPP42Transport: @unchecked Sendable {
 
     var addressedDeviceIndex: UInt8 { deviceIndex }
 
-    init(device: IOHIDDevice, manager: IOHIDManager? = nil, deviceIndex: UInt8 = 0xFF) throws {
+    init(
+        device: IOHIDDevice,
+        manager: IOHIDManager? = nil,
+        deviceIndex: UInt8 = 0xFF,
+        supportsShortReports: Bool = true
+    ) throws {
         self.device = device
         self.manager = manager
         self.deviceIndex = deviceIndex
+        self.supportsShortReports = supportsShortReports
         inputBuffer = .allocate(capacity: inputBufferCapacity)
         inputBuffer.initialize(repeating: 0, count: inputBufferCapacity)
         try openDevice()
@@ -213,7 +222,10 @@ final class HIDPP42Transport: @unchecked Sendable {
     }
 
     convenience init(interface: Interface, deviceIndex: UInt8 = 0xFF) throws {
-        try self.init(device: interface.device, manager: interface.manager, deviceIndex: deviceIndex)
+        try self.init(
+            device: interface.device, manager: interface.manager, deviceIndex: deviceIndex,
+            supportsShortReports: interface.supportsShortReports
+        )
     }
 
     static func connect(interface: Interface, deviceIndex: UInt8 = 0xFF) async throws -> HIDPP42Transport {
@@ -237,7 +249,8 @@ final class HIDPP42Transport: @unchecked Sendable {
         isDeviceOpen = false
     }
 
-    /// Finds only a vendor interface with both HID++ short and long report IDs.
+    /// Finds only a vendor interface with the HID++ long report ID; the short report
+    /// is optional because Bluetooth LE devices only expose the long one.
     /// It never assumes the regular mouse interface carries HID++.
     static func discoverInterface(
         vendorID: Int,
@@ -271,6 +284,7 @@ final class HIDPP42Transport: @unchecked Sendable {
             guard let descriptor = IOHIDDeviceGetProperty(device, (kIOHIDReportDescriptorKey as NSString) as CFString) as? Data,
                   descriptorContainsHIDPPReports(descriptor)
             else { return nil }
+            let supportsShortReports = reportIDs(in: descriptor).contains(shortReportID)
             let name = (IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String) ?? "Logitech HID++"
             let usagePage = (IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsagePageKey as CFString) as? NSNumber)?.intValue ?? 0
             let maxInput = (IOHIDDeviceGetProperty(device, kIOHIDMaxInputReportSizeKey as CFString) as? NSNumber)?.intValue ?? 0
@@ -280,7 +294,8 @@ final class HIDPP42Transport: @unchecked Sendable {
             return (rank, Interface(
                 manager: manager, device: device, vendorID: vendorID, productID: productID,
                 productName: name, usagePage: usagePage,
-                maxInputReportSize: maxInput, maxOutputReportSize: maxOutput
+                maxInputReportSize: maxInput, maxOutputReportSize: maxOutput,
+                supportsShortReports: supportsShortReports
             ))
         }
         .sorted { $0.0 > $1.0 }
@@ -299,23 +314,28 @@ final class HIDPP42Transport: @unchecked Sendable {
     }
 
     static func descriptorContainsHIDPPReports(_ descriptor: Data) -> Bool {
+        reportIDs(in: descriptor).contains(longReportID)
+    }
+
+    /// Returns the report IDs a descriptor declares, or an empty set if it is malformed.
+    static func reportIDs(in descriptor: Data) -> Set<UInt8> {
         let bytes = [UInt8](descriptor)
         var reportIDs = Set<UInt8>()
         var index = 0
         while index < bytes.count {
             let prefix = bytes[index]
             if prefix == 0xFE {
-                guard index + 2 < bytes.count else { return false }
+                guard index + 2 < bytes.count else { return [] }
                 index += 3 + Int(bytes[index + 1])
                 continue
             }
             let code = Int(prefix & 3)
             let size = code == 3 ? 4 : code
-            guard index + size < bytes.count else { return false }
+            guard index + size < bytes.count else { return [] }
             if prefix == 0x85 { reportIDs.insert(bytes[index + 1]) }
             index += 1 + size
         }
-        return reportIDs.contains(0x10) && reportIDs.contains(longReportID)
+        return reportIDs
     }
 
     func featureLookupRequest(for featureID: UInt16, deviceIndex: UInt8? = nil) -> Packet {
@@ -431,7 +451,9 @@ final class HIDPP42Transport: @unchecked Sendable {
             expected = request
             lock.unlock()
             do {
-                try submitReport(request.reportData())
+                try submitReport(request.reportData(
+                    reportID: supportsShortReports ? nil : Self.longReportID
+                ))
             } catch {
                 failPending(with: error)
                 return

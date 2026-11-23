@@ -33,6 +33,8 @@ struct MouseControl: Identifiable, Equatable {
     let source: String
     let isPrimary: Bool
     let isControllable: Bool
+    /// What the button does on its own when MouseKy assigns nothing, if known.
+    var defaultFunction: String? = nil
 }
 
 enum MouseControlPhase: Equatable {
