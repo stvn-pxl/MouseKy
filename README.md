@@ -119,7 +119,10 @@ Everything below this point is intended for developers and contributors.
 
 The project deliberately disables the App Sandbox because it needs direct HID
 access. The Makefile uses an available Apple Development identity so macOS
-permissions survive rebuilds, with ad hoc signing as a fallback. Public
+permissions survive rebuilds, with ad hoc signing as a fallback. To sign Debug
+builds in Xcode with your own team, copy
+`Config/Signing.local.xcconfig.example` to `Config/Signing.local.xcconfig` and
+set your team ID; that file is ignored by git. Public
 releases use Apple Developer ID signing, Hardened Runtime, and notarization.
 
 #### Terminal commands
