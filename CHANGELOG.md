@@ -13,6 +13,16 @@ All notable changes to MouseKy are documented here. The format follows
 - Automated signed, notarized Universal DMG releases.
 - Signed Sparkle updates with daily stable-release checks, manual checks, and
   user-confirmed installation.
+- Logitech G309 support over Bluetooth LE, including button names.
+- Each button row shows the button's built-in function.
+
+### Fixed
+
+- Mice whose primary HID usage is Keyboard (such as the G309 over Bluetooth)
+  are detected, and keyboards with mouse-key interfaces are no longer listed
+  as mice.
+- HID++ works with devices that only expose the long report.
+- Development builds no longer check for updates.
 
 ## [1.0.0] - 2026-09-17
 

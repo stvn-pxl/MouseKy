@@ -1001,3 +1001,112 @@ private final class MockHIDPPSession: HIDPPDeviceSessionProtocol {
         notificationHandler?(packet)
     }
 }
+
+final class HIDDeviceClassifierTests: XCTestCase {
+    private func interface(
+        _ vendorID: Int, _ productID: Int, location: Int = 1, number: Int? = nil,
+        primary: HIDUsage, pairs: [HIDUsage]? = nil
+    ) -> HIDInterfaceInfo {
+        HIDInterfaceInfo(
+            vendorID: vendorID, productID: productID, locationID: location,
+            interfaceNumber: number, primaryUsage: primary, usagePairs: pairs ?? [primary]
+        )
+    }
+
+    private let pointer = HIDUsage(page: 0x01, usage: 0x01)
+    private let systemControl = HIDUsage(page: 0x01, usage: 0x80)
+    private let consumer = HIDUsage(page: 0x0C, usage: 0x01)
+
+    func testLogitechBluetoothMouseWithKeyboardPrimaryUsageIsAMouse() {
+        // Logitech G309 over Bluetooth LE: one interface whose primary usage is Keyboard.
+        let g309 = interface(
+            0x046D, 0xB03C, primary: .keyboard,
+            pairs: [.keyboard, .mouse, pointer, consumer, HIDUsage(page: 0xFF47, usage: 1), HIDUsage(page: 0xFF43, usage: 0x202)]
+        )
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [g309]), [true])
+    }
+
+    func testKeyboardMouseKeysInterfaceIsNotAMouse() {
+        // Keychron K5 Pro over USB: keyboard first, then raw HID, then a mouse-keys interface.
+        let keychron = [
+            interface(0x3434, 0x0251, number: 0, primary: .keyboard),
+            interface(0x3434, 0x0251, number: 1, primary: HIDUsage(page: 0xFF60, usage: 0x61)),
+            interface(0x3434, 0x0251, number: 2, primary: .mouse, pairs: [.mouse, pointer, systemControl, consumer, .keyboard])
+        ]
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: keychron), [false, false, false])
+    }
+
+    func testBluetoothKeyboardWithMouseCollectionIsNotAMouse() {
+        let keyboard = interface(0x3434, 0x0252, primary: .keyboard, pairs: [.keyboard, .mouse, consumer])
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [keyboard]), [false])
+    }
+
+    func testGamingMouseWithMacroKeyboardInterfaceIsAMouse() {
+        let mouse = [
+            interface(0x1532, 0x0001, number: 0, primary: .mouse),
+            interface(0x1532, 0x0001, number: 1, primary: .keyboard),
+            interface(0x1532, 0x0001, number: 2, primary: .mouse, pairs: [.mouse, .keyboard, consumer])
+        ]
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: mouse), [true, false, true])
+    }
+
+    func testLogitechReceiverMouseInterfaceIsAMouseDespiteKeyboardFirst() {
+        let receiver = [
+            interface(0x046D, 0xC52B, number: 0, primary: .keyboard),
+            interface(0x046D, 0xC52B, number: 1, primary: .mouse),
+            interface(0x046D, 0xC52B, number: 2, primary: HIDUsage(page: 0xFF00, usage: 1))
+        ]
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: receiver), [false, true, false])
+    }
+
+    func testPlainBluetoothMouseIsAMouse() {
+        let mouse = interface(0x05AC, 0x030D, primary: .mouse, pairs: [.mouse, pointer])
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [mouse]), [true])
+    }
+
+    func testInterfacesAtDifferentLocationsAreSeparateDevices() {
+        let keyboard = interface(0x3434, 0x0251, location: 1, number: 0, primary: .keyboard)
+        let otherMouse = interface(0x3434, 0x0251, location: 2, number: 2, primary: .mouse)
+        XCTAssertEqual(HIDDeviceClassifier.mouseFlags(for: [keyboard, otherMouse]), [false, true])
+    }
+}
+
+final class HIDPPDescriptorTests: XCTestCase {
+    /// Report descriptor of a Logitech G309 over Bluetooth LE.
+    private let g309BluetoothDescriptor = Data([
+        0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01, 0x95, 0x08, 0x75, 0x01, 0x15, 0x00, 0x25, 0x01,
+        0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x81, 0x02, 0x95, 0x06, 0x75, 0x08, 0x26, 0xFF, 0x00, 0x05,
+        0x07, 0x19, 0x00, 0x29, 0xFF, 0x81, 0x00, 0xC0, 0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x15,
+        0x09, 0x01, 0xA1, 0x00, 0x95, 0x10, 0x75, 0x01, 0x15, 0x00, 0x25, 0x01, 0x05, 0x09, 0x19, 0x01,
+        0x29, 0x10, 0x81, 0x02, 0x95, 0x02, 0x75, 0x10, 0x16, 0x00, 0x80, 0x26, 0xFF, 0x7F, 0x05, 0x01,
+        0x09, 0x30, 0x09, 0x31, 0x81, 0x06, 0x95, 0x01, 0x75, 0x08, 0x15, 0x80, 0x25, 0x7F, 0x09, 0x38,
+        0x81, 0x06, 0x05, 0x0C, 0x0A, 0x38, 0x02, 0x81, 0x06, 0xC0, 0xC0, 0x05, 0x0C, 0x09, 0x01, 0xA1,
+        0x01, 0x85, 0x03, 0x95, 0x02, 0x75, 0x10, 0x15, 0x01, 0x26, 0xFF, 0x02, 0x19, 0x01, 0x2A, 0xFF,
+        0x02, 0x81, 0x00, 0xC0, 0x06, 0x47, 0xFF, 0x09, 0x01, 0xA1, 0x01, 0x85, 0xF0, 0x95, 0x04, 0x75,
+        0x08, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x09, 0x01, 0xB1, 0x02, 0xC0, 0x06, 0x43, 0xFF, 0x0A, 0x02,
+        0x02, 0xA1, 0x01, 0x85, 0x11, 0x95, 0x13, 0x75, 0x08, 0x15, 0x00, 0x26, 0xFF, 0x00, 0x09, 0x02,
+        0x81, 0x00, 0x09, 0x02, 0x91, 0x00, 0xC0,
+    ])
+
+    func testBluetoothDescriptorWithOnlyLongReportIsHIDPP() {
+        let ids = HIDPP42Transport.reportIDs(in: g309BluetoothDescriptor)
+        XCTAssertEqual(ids, [0x01, 0x15, 0x03, 0xF0, 0x11])
+        XCTAssertTrue(HIDPP42Transport.descriptorContainsHIDPPReports(g309BluetoothDescriptor))
+    }
+
+    func testShortPacketCanBeSentAsLongReport() throws {
+        let packet = HIDPP42Transport.Packet(deviceIndex: 0xFF, featureIndex: 0, functionID: 0, parameters: Data([0x1B, 0x04]))
+        let report = try packet.reportData(reportID: HIDPP42Transport.longReportID)
+        XCTAssertEqual(report.count, HIDPP42Transport.longReportLength)
+        XCTAssertEqual(Array(report.prefix(6)), [0x11, 0xFF, 0x00, 0x01, 0x1B, 0x04])
+    }
+}
+
+final class LogitechControlNameTests: XCTestCase {
+    func testG309ButtonSpyNamesIncludeDPIButtonWithDefaultFunction() {
+        let names = (0 ..< 6).map { LogitechControlNames.buttonSpyName(productID: 0xB03C, index: $0) }
+        XCTAssertEqual(names, ["Left Click", "Right Click", "Middle Click", "Back", "Forward", "DPI Switch"])
+        XCTAssertEqual(LogitechControlNames.defaultFunction(forControlName: "DPI Switch"), "Cycle DPI")
+        XCTAssertNil(LogitechControlNames.defaultFunction(forControlName: "Button 7"))
+    }
+}

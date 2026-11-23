@@ -17,6 +17,9 @@ final class HIDDeviceManager: ObservableObject {
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
     private var knownDevices: [ObjectIdentifier: ConnectedMouse] = [:]
     private var deviceReferences: [String: IOHIDDevice] = [:]
+    /// Every attached HID interface. Classification needs the sibling interfaces of a
+    /// device, so mice are always derived from this complete set.
+    private var attachedDevices: Set<IOHIDDevice> = []
 
     init() {
         // Logitech receivers expose some remapped buttons as separate keyboard,
@@ -37,14 +40,22 @@ final class HIDDeviceManager: ObservableObject {
     }
 
     func refresh() {
-        let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> ?? []
+        attachedDevices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> ?? []
+        rebuildMice()
+    }
+
+    private func rebuildMice() {
+        let devices = Array(attachedDevices)
+        let interfaces = devices.map(Self.interfaceInfo(for:))
+        let isMouse = HIDDeviceClassifier.mouseFlags(for: interfaces)
         knownDevices = [:]
         deviceReferences = [:]
-        for device in devices {
+        for (index, device) in devices.enumerated() where isMouse[index] {
             guard let mouse = makeMouse(from: device) else { continue }
             knownDevices[ObjectIdentifier(device)] = mouse
             deviceReferences[mouse.id] = device
         }
+        declaredButtonNumbersByMouseID = declaredButtonNumbersByMouseID.filter { deviceReferences[$0.key] != nil }
         publish()
         for mouse in mice {
             _ = declaredButtonNumbers(for: mouse)
@@ -86,12 +97,7 @@ final class HIDDeviceManager: ObservableObject {
             IOHIDDeviceGetProperty(device, key) as? T
         }
         guard let vendor: NSNumber = property(kIOHIDVendorIDKey as CFString),
-              let product: NSNumber = property(kIOHIDProductIDKey as CFString),
-              let usagePage: NSNumber = property(kIOHIDPrimaryUsagePageKey as CFString),
-              let usage: NSNumber = property(kIOHIDPrimaryUsageKey as CFString),
-              usagePage.intValue == kHIDPage_GenericDesktop,
-              usage.intValue == kHIDUsage_GD_Mouse,
-              !declaresKeyboardKeys(device)
+              let product: NSNumber = property(kIOHIDProductIDKey as CFString)
         else { return nil }
         let name: String = property(kIOHIDProductKey as CFString) ?? "Unknown Mouse"
         let manufacturer: String? = property(kIOHIDManufacturerKey as CFString)
@@ -111,19 +117,50 @@ final class HIDDeviceManager: ObservableObject {
         )
     }
 
-    /// Some keyboards and macro pads expose a secondary Mouse collection for
-    /// mouse-key emulation. It is not a separately configurable pointing device,
-    /// so exclude a Mouse collection that also declares normal keyboard keys.
-    private func declaresKeyboardKeys(_ device: IOHIDDevice) -> Bool {
-        guard let elements = IOHIDDeviceCopyMatchingElements(
-            device, nil, IOOptionBits(kIOHIDOptionsTypeNone)
-        ) else {
-            return false
+    private static func interfaceInfo(for device: IOHIDDevice) -> HIDInterfaceInfo {
+        func integer(_ key: String) -> Int? {
+            (IOHIDDeviceGetProperty(device, key as CFString) as? NSNumber)?.intValue
         }
-        return (elements as NSArray).contains { value in
-            let element = value as! IOHIDElement
-            return IOHIDElementGetUsagePage(element) == 0x07
+        let pairs = (IOHIDDeviceGetProperty(device, kIOHIDDeviceUsagePairsKey as CFString) as? [[String: Any]] ?? [])
+            .compactMap { pair -> HIDUsage? in
+                guard let page = (pair[kIOHIDDeviceUsagePageKey] as? NSNumber)?.intValue,
+                      let usage = (pair[kIOHIDDeviceUsageKey] as? NSNumber)?.intValue
+                else { return nil }
+                return HIDUsage(page: page, usage: usage)
+            }
+        return HIDInterfaceInfo(
+            vendorID: integer(kIOHIDVendorIDKey) ?? 0,
+            productID: integer(kIOHIDProductIDKey) ?? 0,
+            locationID: integer(kIOHIDLocationIDKey),
+            interfaceNumber: usbInterfaceNumber(for: device),
+            primaryUsage: HIDUsage(
+                page: integer(kIOHIDPrimaryUsagePageKey) ?? 0,
+                usage: integer(kIOHIDPrimaryUsageKey) ?? 0
+            ),
+            usagePairs: pairs
+        )
+    }
+
+    /// USB HID devices sit below their IOUSBHostInterface, which carries the interface
+    /// number. Bluetooth and built-in devices have none.
+    private static func usbInterfaceNumber(for device: IOHIDDevice) -> Int? {
+        var entry = IOHIDDeviceGetService(device)
+        guard entry != IO_OBJECT_NULL else { return nil }
+        IOObjectRetain(entry)
+        defer { IOObjectRelease(entry) }
+        for _ in 0..<3 {
+            if let number = IORegistryEntryCreateCFProperty(
+                entry, "bInterfaceNumber" as CFString, kCFAllocatorDefault, 0
+            )?.takeRetainedValue() as? NSNumber {
+                return number.intValue
+            }
+            var parent: io_registry_entry_t = IO_OBJECT_NULL
+            guard IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent) == KERN_SUCCESS
+            else { return nil }
+            IOObjectRelease(entry)
+            entry = parent
         }
+        return nil
     }
 
     private static let deviceAdded: IOHIDDeviceCallback = { context, _, _, device in
@@ -183,19 +220,93 @@ final class HIDDeviceManager: ObservableObject {
     }
 
     private func add(_ device: IOHIDDevice) {
-        if let mouse = makeMouse(from: device) {
-            knownDevices[ObjectIdentifier(device)] = mouse
-            deviceReferences[mouse.id] = device
-            publish()
-            _ = declaredButtonNumbers(for: mouse)
-        }
+        attachedDevices.insert(device)
+        rebuildMice()
     }
 
     private func remove(_ device: IOHIDDevice) {
-        if let mouse = knownDevices.removeValue(forKey: ObjectIdentifier(device)) {
-            deviceReferences.removeValue(forKey: mouse.id)
-            declaredButtonNumbersByMouseID.removeValue(forKey: mouse.id)
+        attachedDevices.remove(device)
+        rebuildMice()
+    }
+}
+
+struct HIDUsage: Hashable {
+    let page: Int
+    let usage: Int
+
+    static let mouse = HIDUsage(page: 0x01, usage: 0x02)
+    static let keyboard = HIDUsage(page: 0x01, usage: 0x06)
+    static let keypad = HIDUsage(page: 0x01, usage: 0x07)
+}
+
+/// The IORegistry facts MouseKy needs to tell mice and keyboards apart.
+struct HIDInterfaceInfo: Equatable {
+    var vendorID: Int
+    var productID: Int
+    var locationID: Int?
+    /// USB interface number; nil for Bluetooth and built-in devices.
+    var interfaceNumber: Int?
+    var primaryUsage: HIDUsage
+    var usagePairs: [HIDUsage]
+
+    var usages: Set<HIDUsage> { Set(usagePairs).union([primaryUsage]) }
+}
+
+/// Decides which HID interfaces are configurable mice.
+///
+/// Many keyboards (for example QMK keyboards with mouse keys) expose an extra
+/// interface with a Mouse collection, and many mice (for example Logitech's
+/// Bluetooth mice) carry Keyboard collections so buttons can send keystrokes.
+/// Neither the presence of a Mouse nor of a Keyboard collection decides it, so a
+/// physical device is classified by its lead interface: the lowest USB interface
+/// number, or for single-interface devices the primary usage. Keyboards put their
+/// keyboard first. Logitech receivers also put a keyboard first, so Logitech
+/// devices with a HID++ interface are always treated as mouse-capable.
+enum HIDDeviceClassifier {
+    static let logitechVendorID = 0x046D
+    static let hidppUsagePages: Set<Int> = [0xFF00, 0xFF43]
+
+    static func mouseFlags(for interfaces: [HIDInterfaceInfo]) -> [Bool] {
+        struct FamilyKey: Hashable {
+            let vendorID: Int
+            let productID: Int
+            let locationID: Int
         }
-        publish()
+        var families: [FamilyKey: [HIDInterfaceInfo]] = [:]
+        for interface in interfaces {
+            guard let key = interface.locationID.map({
+                FamilyKey(vendorID: interface.vendorID, productID: interface.productID, locationID: $0)
+            }) else { continue }
+            families[key, default: []].append(interface)
+        }
+        return interfaces.map { interface in
+            let family = interface.locationID.flatMap {
+                families[FamilyKey(vendorID: interface.vendorID, productID: interface.productID, locationID: $0)]
+            } ?? [interface]
+            return isMouse(interface, family: family)
+        }
+    }
+
+    static func isMouse(_ interface: HIDInterfaceInfo, family: [HIDInterfaceInfo]) -> Bool {
+        guard interface.usages.contains(.mouse) else { return false }
+        if isLogitechHIDPP(family) { return true }
+        return !isKeyboard(lead(of: family) ?? interface)
+    }
+
+    private static func lead(of family: [HIDInterfaceInfo]) -> HIDInterfaceInfo? {
+        family
+            .filter { $0.interfaceNumber != nil }
+            .min { $0.interfaceNumber! < $1.interfaceNumber! }
+    }
+
+    private static func isKeyboard(_ interface: HIDInterfaceInfo) -> Bool {
+        interface.primaryUsage == .keyboard || interface.primaryUsage == .keypad
+    }
+
+    private static func isLogitechHIDPP(_ family: [HIDInterfaceInfo]) -> Bool {
+        family.contains { interface in
+            interface.vendorID == logitechVendorID &&
+                interface.usages.contains { hidppUsagePages.contains($0.page) }
+        }
     }
 }

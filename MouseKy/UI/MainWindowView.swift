@@ -563,8 +563,17 @@ private struct MappingRow: View {
         let isPrimary = control?.isPrimary ?? mapping.isPrimaryButton
         let isRecentlyPressed = model.wasRecentlyPressed(mapping.controlID)
         HStack {
-            Text(model.displayName(for: mapping))
-                .foregroundStyle(isRecentlyPressed ? .green : .primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.displayName(for: mapping))
+                    .foregroundStyle(isRecentlyPressed ? .green : .primary)
+                if let defaultFunction = control?.defaultFunction {
+                    Text(mapping.shortcut == nil
+                        ? "Default: \(defaultFunction)"
+                        : "Replaces: \(defaultFunction)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             if !isPrimary {
                 if model.isBlockedByOnboardAssignment(mapping.controlID) {
