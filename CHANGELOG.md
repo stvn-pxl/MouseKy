@@ -21,10 +21,6 @@ All notable changes to MouseKy are documented here. The format follows
 - HID++ works with devices that only expose the long report.
 - Development builds no longer check for updates.
 
-### Changed
-
-- Sparkle updated to 2.10.1.
-
 ## [1.0.0] - 2026-09-17
 
 ### Added
