@@ -38,6 +38,20 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
+          # Release notes come from the matching CHANGELOG.md section so they
+          # list user-facing changes only (no dependency or CI bumps).
+          NOTES_PATH="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$VERSION" '
+            /^## \[/ { in_section = index($0, "## [" version "]") == 1; next }
+            in_section && /^\[[^]]+\]: / { next }
+            in_section { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > "$NOTES_PATH"
+          if ! grep -q '[^[:space:]]' "$NOTES_PATH"; then
+            echo "CHANGELOG.md has no section for $VERSION" >&2
+            exit 1
+          fi
+          echo "NOTES_PATH=$NOTES_PATH" >> "$GITHUB_ENV"
+
       - name: Import Developer ID certificate
         env:
           P12_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_BASE64 }}
@@ -193,7 +207,6 @@ jobs:
 
       - name: Create signed Sparkle update
         env:
-          GH_TOKEN: ${{ github.token }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
         run: |
           UPDATE_DIR=".build-release/updates"
@@ -203,11 +216,7 @@ jobs:
           mkdir -p "$UPDATE_DIR"
 
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$UPDATE_ZIP"
-          gh api \
-            --method POST \
-            "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-            -f tag_name="$GITHUB_REF_NAME" \
-            --jq .body > "$RELEASE_NOTES"
+          cp "$NOTES_PATH" "$RELEASE_NOTES"
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$GENERATE_APPCAST" \
             --ed-key-file - \
             --download-url-prefix "$DOWNLOAD_URL" \
